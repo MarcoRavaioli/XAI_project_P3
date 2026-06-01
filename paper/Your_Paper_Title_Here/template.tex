@@ -1,0 +1,88 @@
+% ------------------------------------------------
+% LaTeX Template for ML/AI Research Paper
+% ------------------------------------------------
+
+\documentclass[11pt]{article}
+
+% ------------------------------------------------
+% Packages
+% ------------------------------------------------
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{natbib}          % For bibliography
+\usepackage{geometry}        % For adjusting margins
+\usepackage{times}           % For Times New Roman font
+\usepackage{float}           % For controlling float positions
+\usepackage{booktabs}        % For professional-looking tables
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{color}
+
+% ------------------------------------------------
+% Page Setup
+% ------------------------------------------------
+\geometry{margin=1in}
+
+% ------------------------------------------------
+% Title and Author Information
+% ------------------------------------------------
+\title{Mechanistic Interpretability of Vision Transformers:\\Sparse Autoencoder Feature Decomposition for Visual Concept Discovery}
+\author{
+  % Author names and affiliations
+  \normalsize Politecnico di Torino \\
+  \normalsize Explainable and Trustworthy AI -- 2025/2026
+}
+\date{\today}
+
+% ------------------------------------------------
+% Document Begins
+% ------------------------------------------------
+\begin{document}
+
+\maketitle
+
+% ------------------------------------------------
+% Abstract
+% ------------------------------------------------
+\begin{abstract}
+\input{Chapters/abstract}
+\end{abstract}
+
+\noindent\textbf{Keywords:} Mechanistic Interpretability, Vision Transformers, Sparse Autoencoders, Polysemanticity, Feature Decomposition, Explainable AI
+
+% ------------------------------------------------
+% Main Content
+% ------------------------------------------------
+
+% 1. Introduction
+\section{Introduction}
+\input{Chapters/introduction}
+
+% 2. Related Work – Literature Review
+\section{Related Work}
+\input{Chapters/related_work}
+
+% 3. Research Gap Discussion
+\section{Research Gap Discussion}
+\input{Chapters/research_gap}
+
+% 4. Methodology and Implementation
+\section{Methodology and Implementation}
+\input{Chapters/methodology}
+
+% 5. Results and Analysis
+\section{Results and Analysis}
+\input{Chapters/results}
+
+% 6. Conclusion
+\section{Conclusion}
+\input{Chapters/conclusion}
+
+% ------------------------------------------------
+% References
+% ------------------------------------------------
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
