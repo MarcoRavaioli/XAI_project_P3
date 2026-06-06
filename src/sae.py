@@ -112,7 +112,8 @@ class SparseAutoencoder(nn.Module):
         Loss = MSE(x, x_hat) + l1_coeff * sum(|f|_1)
         """
         mse_loss = torch.mean((x - x_hat) ** 2)
-        l1_loss = torch.mean(torch.sum(f, dim=-1)) # sparsity l1 loss (avg sum of active feat activ across tokens)
+        # sparsity l1 loss (avg sum of active feat activ across tokens)
+        l1_loss = torch.mean(torch.sum(torch.abs(f), dim=-1))
         
         total_loss = mse_loss + l1_coeff * l1_loss
         

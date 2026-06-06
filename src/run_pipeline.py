@@ -8,13 +8,13 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10
 
-from typing import List, Dict, Any, Tuple
+from typing import List
 
 from model_loader import set_seed, ViTModelWrapper, ActivationHook
 from sae import SparseAutoencoder
 from caching_and_training import TokenActivationBuffer, train_sae
 from interpretability import get_top_activating_patches, CLIPAutoLabeler, save_feature_grid_visualization
-from causal_eval import evaluate_relative_logit_drop, plot_dose_response, perform_causal_intervention
+from causal_eval import plot_dose_response, perform_causal_intervention
 
 logging.basicConfig(
     level=logging.INFO,
@@ -58,8 +58,8 @@ def parse_args():
     parser.add_argument(
         "--subset_size", 
         type=int, 
-        default=1000, 
-        help="Subset size for testing"
+        default=50, 
+        help="Size of subset for rapid pipeline testing"
     )
     parser.add_argument(
         "--feature_idx", 
@@ -115,7 +115,7 @@ def get_top_active_features(
             activation = hook.activation
             if activation is None:
                 continue
-            # discard CLS token (index 0)
+            # Discard CLS token (index 0)
             patch_tokens = activation[:, 1:, :]
             f = sae.encode(patch_tokens) # [batch, num_patches, hidden_dim]
             total_activations += f.sum(dim=(0, 1))
@@ -161,48 +161,71 @@ def main():
     device = args.device
     logger.info(f"Running pipeline on target device: {device}")
     
-    # 2. Loading ViT Backbone
+    # 2. Loading Vision Transformer Backbone
     model_wrapper = ViTModelWrapper(model_name=args.model, device=device)
     
     # 3. Data Loader setup
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    
     if args.dataset == "cifar10":
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
         logger.info("Setting up CIFAR-10 test dataset...")
         dataset = CIFAR10(root=args.dataset_path, train=False, download=True, transform=transform)
-    elif args.dataset == "imagewoof":
-        try:
-            val_dir = check_and_download_imagewoof(args.dataset_path)
-            logger.info(f"Setting up ImageWoof dataset from {val_dir}...")
-            from torchvision.datasets import ImageFolder
-            dataset = ImageFolder(root=val_dir, transform=transform)
-        except Exception as e:
-            logger.warning(f"Could not load ImageWoof: {e}. Falling back to downloading CIFAR-10.")
-            dataset = CIFAR10(root="./data", train=False, download=True, transform=transform)
     else:
-        target_path = args.dataset_path
-        if target_path == "./data":
-            target_path = os.path.join(args.dataset_path, args.dataset)
-            
-        logger.info(f"Setting up {args.dataset} dataset from path {target_path}...")
-        from torchvision.datasets import ImageFolder
-        if os.path.exists(target_path):
+        # Standard ImageNet-style preprocessing preserves aspect ratio before cropping
+        transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        
+        if args.dataset == "imagewoof":
             try:
-                dataset = ImageFolder(root=target_path, transform=transform)
+                val_dir = check_and_download_imagewoof(args.dataset_path)
+                logger.info(f"Setting up ImageWoof dataset from {val_dir}...")
+                from torchvision.datasets import ImageFolder
+                dataset = ImageFolder(root=val_dir, transform=transform)
             except Exception as e:
-                logger.warning(
-                    f"Failed to load ImageFolder at {target_path} due to: {e}. "
-                    "Falling back to downloading CIFAR-10."
-                )
-                dataset = CIFAR10(root="./data", train=False, download=True, transform=transform)
+                logger.warning(f"Could not load ImageWoof: {e}. Falling back to downloading CIFAR-10.")
+                cifar_transform = transforms.Compose([
+                    transforms.Resize((224, 224)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                ])
+                dataset = CIFAR10(root="./data", train=False, download=True, transform=cifar_transform)
         else:
-            logger.warning(f"Dataset path {target_path} not found. Falling back to downloading CIFAR-10.")
-            dataset = CIFAR10(root="./data", train=False, download=True, transform=transform)
-            
+            # Determine dataset-specific target path if the generic root is used
+            target_path = args.dataset_path
+            if target_path == "./data":
+                target_path = os.path.join(args.dataset_path, args.dataset)
+                
+            logger.info(f"Setting up {args.dataset} dataset from path {target_path}...")
+            from torchvision.datasets import ImageFolder
+            if os.path.exists(target_path):
+                try:
+                    dataset = ImageFolder(root=target_path, transform=transform)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to load ImageFolder at {target_path} due to: {e}. "
+                        "Falling back to downloading CIFAR-10."
+                    )
+                    cifar_transform = transforms.Compose([
+                        transforms.Resize((224, 224)),
+                        transforms.ToTensor(),
+                        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                    ])
+                    dataset = CIFAR10(root="./data", train=False, download=True, transform=cifar_transform)
+            else:
+                logger.warning(f"Dataset path {target_path} not found. Falling back to downloading CIFAR-10.")
+                cifar_transform = transforms.Compose([
+                    transforms.Resize((224, 224)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                ])
+                dataset = CIFAR10(root="./data", train=False, download=True, transform=cifar_transform)
             
     subset = torch.utils.data.Subset(dataset, range(min(args.subset_size, len(dataset))))
     dataloader = DataLoader(subset, batch_size=8, shuffle=False)
@@ -211,9 +234,11 @@ def main():
     layers_to_compare = [5, 10] # Layer 6 and Layer 11
     layer_comparison_summary = []
     discovered_features_detail = []
-    grid_features_dict = {} # hold Layer 11 exemplar grids
+    grid_features_dict = {}
+    layer_saes = {}
+    layer_top_features = {}
     
-    # pre-load CLIP Auto-Labeler once to avoid reloading for every feature/layer
+    # Pre-load CLIP Auto-Labeler once to avoid reloading for every feature/layer
     labeler = CLIPAutoLabeler(device=device)
     candidate_concepts = [
         "sky", "grass", "metal texture", "fur", "eye", 
@@ -221,13 +246,13 @@ def main():
         "striped pattern", "wing", "smooth surface"
     ]
     
-    # we select the first image in dataset for visual intervention evaluation
+    # Select first image in dataset for surgical visual intervention evaluation
     first_img_tensor, first_img_label = dataset[0]
     eval_image = first_img_tensor.unsqueeze(0).to(device)  # shape: [1, 3, 224, 224]
     
-    
+    # Get baseline class prediction for eval_image
     with torch.no_grad():
-        out = model_wrapper.model(eval_image) # baseline class prediction for eval_image
+        out = model_wrapper.model(eval_image)
         logits = out.logits if hasattr(out, "logits") else out.last_hidden_state[:, 0]
         predicted_class_idx = logits.argmax(dim=-1).item()
     
@@ -236,7 +261,6 @@ def main():
     for layer in layers_to_compare:
         layer_name = f"Layer {layer+1}"
         logger.info(f"\n" + "="*50 + f"\nPROCESSING LAYER: {layer_name}\n" + "="*50)
-        
         activation_buffer = TokenActivationBuffer(
             model_wrapper=model_wrapper,
             dataloader=dataloader,
@@ -252,7 +276,7 @@ def main():
             tied=False
         ).to(device)
         
-        # train loop
+        # Train SAE
         history = train_sae(
             sae=sae,
             activation_buffer=activation_buffer,
@@ -278,6 +302,9 @@ def main():
         
         logger.info(f"Top 10 active features identified for {layer_name}: {top_features}")
         
+        layer_saes[layer] = sae
+        layer_top_features[layer] = top_features
+        
         layer_drops = []
         
         for idx, f_idx in enumerate(top_features):
@@ -292,10 +319,10 @@ def main():
                 device=device
             )
             
-            # auto-label with CLIP
+            # Auto-label with CLIP
             best_concept, best_score, all_scores = labeler.label_feature(exemplars, candidate_concepts)
             
-            # extract baseline logit
+            # Baseline logit
             with torch.no_grad():
                 out_baseline = model_wrapper.model(eval_image)
                 logits_base = out_baseline.logits if hasattr(out_baseline, "logits") else out_baseline.last_hidden_state[:, 0]
@@ -330,14 +357,12 @@ def main():
             }
             discovered_features_detail.append(feat_result)
             
-            # here we cache Layer 11 representative features (top 5) for grid visualization
             if layer == 10 and len(grid_features_dict) < 5:
                 grid_features_dict[f_idx] = {
                     "exemplars": exemplars,
                     "concept": best_concept
                 }
                 
-        # this is the mean relative logit drop for the layer
         mean_logit_drop = sum(layer_drops) / (len(layer_drops) + 1e-8)
         
         layer_comparison_summary.append({
@@ -347,14 +372,13 @@ def main():
             "Mean Logit Drop": f"{mean_logit_drop:.4f}%"
         })
         
-    # 5. Export comparative table to stdout and file
-    linea_div = "=" * 59
-    md_table_title = "             MULTI-LAYER COMPARATIVE SUMMARY"
-    md_table_header = f"{linea_div}\n{md_table_title}\n{linea_div}"
-    print(md_table_header)
+    # 5. summary table to stdout and file
     markdown_table = (
-        f"| {'Layer':10} | {'R^2 Score':9} | {'L_0 Norm':8} | {'Mean Logit Drop':17} |\n"
-        "|" + "-"*12 + "|" + "-"*11 + "|" + "-"*10 + "|" + "-"*19 + "|\n"
+        "\n" + "="*59 + "\n"
+        + "             MULTI-LAYER COMPARATIVE SUMMARY\n"
+        + "="*59 + "\n"
+        + f"| {'Layer':10} | {'R^2 Score':9} | {'L_0 Norm':8} | {'Mean Logit Drop':17} |\n"
+        + "|" + "-"*12 + "|" + "-"*11 + "|" + "-"*10 + "|" + "-"*19 + "|\n"
     )
     for row in layer_comparison_summary:
         markdown_table += f"| {row['Layer']:10} | {row['R^2 Score']:9} | {row['L_0 Norm']:8} | {row['Mean Logit Drop']:17} |\n"
@@ -384,12 +408,14 @@ def main():
     
     # 8. Plot Dose-Response for a representative feature (Feature 100 on Layer 11)
     logger.info("Generating Causal Dose-Response curve for representation...")
+    layer11_sae = layer_saes[10]
+    layer11_features = layer_top_features[10]
     plot_dose_response(
         model_wrapper=model_wrapper,
-        sae=sae,
+        sae=layer11_sae,
         images=eval_image,
         layer_idx=10,
-        feature_idx=top_features[0] if top_features else 100,
+        feature_idx=layer11_features[0] if layer11_features else 100,
         target_class_idx=predicted_class_idx,
         target_type="mlp",
         save_path="dose_response_curve.png"

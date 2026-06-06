@@ -100,13 +100,13 @@ def get_top_activating_patches(
                         exemplar = {
                             "activation": act_val,
                             "crop": crop,
+                            "full_image": img_tensor,
                             "spatial_idx": p,
                             "batch_idx": batch_idx,
                             "img_idx_in_batch": b,
                         }
 
                         top_exemplars.append(exemplar)
-                        # sort and truncate list to preserve top-k
                         top_exemplars.sort(key=lambda x: x["activation"], reverse=True)
                         top_exemplars = top_exemplars[:k]
 
@@ -158,18 +158,21 @@ class CLIPAutoLabeler:
         mean = np.array([0.485, 0.456, 0.406])
         std = np.array([0.229, 0.224, 0.225])
 
-        crops = []
+        # Use full source images for CLIP (tiny crops are too small for meaningful similarity)
+        images_for_clip = []
         for ex in exemplars:
-            crop_np = ex["crop"].permute(1, 2, 0).cpu().numpy()
-            # Unnormalize from ViT preprocessing back to [0, 1] range
-            crop_unnorm = crop_np * std + mean
-            crop_unnorm = np.clip(crop_unnorm, 0.0, 1.0)
-            # Convert to [0, 255] uint8 format
-            crop_uint8 = (crop_unnorm * 255.0).clip(0, 255).astype(np.uint8)
-            crops.append(crop_uint8)
+            if "full_image" in ex:
+                img_np = ex["full_image"].permute(1, 2, 0).cpu().numpy()
+            else:
+                img_np = ex["crop"].permute(1, 2, 0).cpu().numpy()
+            img_unnorm = img_np * std + mean
+            img_unnorm = np.clip(img_unnorm, 0.0, 1.0)
+            img_uint8 = (img_unnorm * 255.0).clip(0, 255).astype(np.uint8)
+            images_for_clip.append(img_uint8)
 
+        # Process image crops using modern CLIPProcessor API signature with modality-specific kwargs
         image_inputs = self.processor(
-            images=crops, images_kwargs={"return_tensors": "pt"}
+            images=images_for_clip, images_kwargs={"return_tensors": "pt"}
         )
         image_inputs = {k: v.to(self.device) for k, v in image_inputs.items()}
 
@@ -203,7 +206,9 @@ class CLIPAutoLabeler:
 
             # Cosine similarity matrix: [num_exemplars, num_concepts]
             similarity_matrix = torch.matmul(image_features, text_features.t())
-            mean_similarities = similarity_matrix.mean(dim=0).cpu().numpy() # avg similarity
+            mean_similarities = (
+                similarity_matrix.mean(dim=0).cpu().numpy()
+            )  # avg similarity
 
         all_scores = {
             concept: float(mean_similarities[idx])
@@ -243,7 +248,7 @@ def save_feature_grid_visualization(
     for r in range(5):
         if r >= len(feature_indices):
             for c in range(5):
-                axes[r, c].axis("off") # fill empty rows if we have fewer features
+                axes[r, c].axis("off")  # fill empty rows if we have fewer features
             continue
 
         feat_idx = feature_indices[r]
