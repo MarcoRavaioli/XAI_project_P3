@@ -58,8 +58,8 @@ def parse_args():
     parser.add_argument(
         "--subset_size", 
         type=int, 
-        default=50, 
-        help="Size of CIFAR-10 subset for rapid pipeline testing"
+        default=1000, 
+        help="Subset size for testing"
     )
     parser.add_argument(
         "--feature_idx", 
@@ -72,6 +72,19 @@ def parse_args():
         type=str,
         default="cpu",
         help="Device to run on ('cpu', 'cuda')"
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="cifar10",
+        choices=["cifar10", "imagewoof", "imagenet"],
+        help="Target dataset paradigm ('cifar10', 'imagewoof', 'imagenet')"
+    )
+    parser.add_argument(
+        "--dataset_path",
+        type=str,
+        default="./data",
+        help="Local file path directory for custom datasets"
     )
     return parser.parse_args()
 
@@ -124,7 +137,7 @@ def main():
     # 2. Loading ViT Backbone
     model_wrapper = ViTModelWrapper(model_name=args.model, device=device)
     
-    # 3. Data Loader setup (CIFAR-10)
+    # 3. Data Loader setup
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -134,6 +147,19 @@ def main():
     logger.info("Setting up CIFAR-10 test dataset...")
     dataset = CIFAR10(root="./data", train=False, download=True, transform=transform)
     subset = torch.utils.data.Subset(dataset, range(args.subset_size))
+    if args.dataset == "cifar10":
+        logger.info("Setting up CIFAR-10 test dataset...")
+        dataset = CIFAR10(root=args.dataset_path, train=False, download=True, transform=transform)
+    else:
+        logger.info(f"Setting up {args.dataset} dataset from path {args.dataset_path}...")
+        from torchvision.datasets import ImageFolder
+        if os.path.exists(args.dataset_path):
+            dataset = ImageFolder(root=args.dataset_path, transform=transform)
+        else:
+            logger.warning(f"Dataset path {args.dataset_path} not found. Falling back to downloading CIFAR-10.")
+            dataset = CIFAR10(root="./data", train=False, download=True, transform=transform)
+            
+    subset = torch.utils.data.Subset(dataset, range(min(args.subset_size, len(dataset))))
     dataloader = DataLoader(subset, batch_size=8, shuffle=False)
     
     # 4. Multi-Layer Comparative Loop
