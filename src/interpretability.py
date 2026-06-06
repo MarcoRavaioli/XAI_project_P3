@@ -154,15 +154,19 @@ class CLIPAutoLabeler:
         if not exemplars:
             return "inactive", 0.0, {c: 0.0 for c in candidate_concepts}
 
-        # convert to float numpy arrays [0, 1] or uint8 [0, 255]
+        # ImageNet/CIFAR-10 normalization values to unnormalize crops for CLIP
+        mean = np.array([0.485, 0.456, 0.406])
+        std = np.array([0.229, 0.224, 0.225])
+
         crops = []
         for ex in exemplars:
             crop_np = ex["crop"].permute(1, 2, 0).cpu().numpy()
-            if crop_np.max() <= 1.01:
-                crop_np = (crop_np * 255.0).clip(0, 255).astype(np.uint8)
-            else:
-                crop_np = crop_np.clip(0, 255).astype(np.uint8)
-            crops.append(crop_np)
+            # Unnormalize from ViT preprocessing back to [0, 1] range
+            crop_unnorm = crop_np * std + mean
+            crop_unnorm = np.clip(crop_unnorm, 0.0, 1.0)
+            # Convert to [0, 255] uint8 format
+            crop_uint8 = (crop_unnorm * 255.0).clip(0, 255).astype(np.uint8)
+            crops.append(crop_uint8)
 
         image_inputs = self.processor(
             images=crops, images_kwargs={"return_tensors": "pt"}
