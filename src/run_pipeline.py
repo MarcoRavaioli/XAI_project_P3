@@ -126,6 +126,33 @@ def get_top_active_features(
     top_values, top_indices = torch.topk(mean_activations, k=num_features)
     return top_indices.cpu().tolist()
 
+def check_and_download_imagewoof(data_dir: str) -> str:
+    import urllib.request
+    import tarfile
+    
+    dataset_dir = os.path.join(data_dir, "imagewoof2-320")
+    val_dir = os.path.join(dataset_dir, "val")
+    
+    if os.path.exists(val_dir):
+        return val_dir
+        
+    os.makedirs(data_dir, exist_ok=True)
+    tar_path = os.path.join(data_dir, "imagewoof2-320.tgz")
+    url = "https://s3.amazonaws.com/fast-ai-imageclas/imagewoof2-320.tgz"
+    
+    try:
+        logger.info(f"ImageWoof not found at {val_dir}. Auto-downloading from {url}...")
+        urllib.request.urlretrieve(url, tar_path)
+        logger.info("Extracting ImageWoof dataset...")
+        with tarfile.open(tar_path, "r:gz") as tar:
+            tar.extractall(path=data_dir)
+        os.remove(tar_path)
+        logger.info(f"ImageWoof setup completed at {val_dir}.")
+        return val_dir
+    except Exception as e:
+        logger.error(f"Failed to auto-download ImageWoof: {e}")
+        raise e
+
 def main():
     args = parse_args()
     
@@ -150,6 +177,15 @@ def main():
     if args.dataset == "cifar10":
         logger.info("Setting up CIFAR-10 test dataset...")
         dataset = CIFAR10(root=args.dataset_path, train=False, download=True, transform=transform)
+    elif args.dataset == "imagewoof":
+        try:
+            val_dir = check_and_download_imagewoof(args.dataset_path)
+            logger.info(f"Setting up ImageWoof dataset from {val_dir}...")
+            from torchvision.datasets import ImageFolder
+            dataset = ImageFolder(root=val_dir, transform=transform)
+        except Exception as e:
+            logger.warning(f"Could not load ImageWoof: {e}. Falling back to downloading CIFAR-10.")
+            dataset = CIFAR10(root="./data", train=False, download=True, transform=transform)
     else:
         target_path = args.dataset_path
         if target_path == "./data":
