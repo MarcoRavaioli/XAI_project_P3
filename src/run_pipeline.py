@@ -151,13 +151,25 @@ def main():
         logger.info("Setting up CIFAR-10 test dataset...")
         dataset = CIFAR10(root=args.dataset_path, train=False, download=True, transform=transform)
     else:
-        logger.info(f"Setting up {args.dataset} dataset from path {args.dataset_path}...")
+        target_path = args.dataset_path
+        if target_path == "./data":
+            target_path = os.path.join(args.dataset_path, args.dataset)
+            
+        logger.info(f"Setting up {args.dataset} dataset from path {target_path}...")
         from torchvision.datasets import ImageFolder
-        if os.path.exists(args.dataset_path):
-            dataset = ImageFolder(root=args.dataset_path, transform=transform)
+        if os.path.exists(target_path):
+            try:
+                dataset = ImageFolder(root=target_path, transform=transform)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load ImageFolder at {target_path} due to: {e}. "
+                    "Falling back to downloading CIFAR-10."
+                )
+                dataset = CIFAR10(root="./data", train=False, download=True, transform=transform)
         else:
-            logger.warning(f"Dataset path {args.dataset_path} not found. Falling back to downloading CIFAR-10.")
+            logger.warning(f"Dataset path {target_path} not found. Falling back to downloading CIFAR-10.")
             dataset = CIFAR10(root="./data", train=False, download=True, transform=transform)
+            
             
     subset = torch.utils.data.Subset(dataset, range(min(args.subset_size, len(dataset))))
     dataloader = DataLoader(subset, batch_size=8, shuffle=False)
