@@ -171,9 +171,6 @@ def main():
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
-    logger.info("Setting up CIFAR-10 test dataset...")
-    dataset = CIFAR10(root="./data", train=False, download=True, transform=transform)
-    subset = torch.utils.data.Subset(dataset, range(args.subset_size))
     if args.dataset == "cifar10":
         logger.info("Setting up CIFAR-10 test dataset...")
         dataset = CIFAR10(root=args.dataset_path, train=False, download=True, transform=transform)
