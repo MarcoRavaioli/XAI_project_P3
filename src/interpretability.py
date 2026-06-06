@@ -225,11 +225,14 @@ class CLIPAutoLabeler:
 
 
 def save_feature_grid_visualization(
-    top_features_dict: Dict[int, Dict[str, Any]], output_path: str
+    top_features_dict: Dict[int, Dict[str, Any]],
+    output_path: str,
+    patch_size: int = 16,
+    grid_size: int = 14,
 ):
     """
     Generates and saves a unified 5x5 grid plot representing 5 SAE features (rows)
-    and their top-5 activating spatial image crops (columns).
+    and their top-5 activating images with highlighted active patches (columns).
 
     Each row is labeled with its feature index and assigned CLIP concept.
     """
@@ -237,8 +240,9 @@ def save_feature_grid_visualization(
 
     matplotlib.use("agg")
     import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
 
-    # ImageNet/CIFAR-10 normalization values to unnormalize crops for display
+    # ImageNet/CIFAR-10 normalization values to unnormalize images for display
     mean = np.array([0.485, 0.456, 0.406])
     std = np.array([0.229, 0.224, 0.225])
 
@@ -275,17 +279,40 @@ def save_feature_grid_visualization(
                 continue
 
             ex = exemplars[c]
-            crop_tensor = ex["crop"]  # shape [3, H, W]
+            # Try to use full image to display with a highlighted bounding box,
+            # otherwise fallback to crop.
+            if "full_image" in ex:
+                img_tensor = ex["full_image"]
+                has_full = True
+            else:
+                img_tensor = ex["crop"]
+                has_full = False
+
             act = ex["activation"]
+            spatial_idx = ex.get("spatial_idx", None)
 
             # channel-first tensor to channel-last numpy
-            crop_np = crop_tensor.permute(1, 2, 0).cpu().numpy()
+            img_np = img_tensor.permute(1, 2, 0).cpu().numpy()
 
             # unnormalize
-            crop_unnorm = crop_np * std + mean
-            crop_unnorm = np.clip(crop_unnorm, 0.0, 1.0)
+            img_unnorm = img_np * std + mean
+            img_unnorm = np.clip(img_unnorm, 0.0, 1.0)
 
-            ax.imshow(crop_unnorm)
+            ax.imshow(img_unnorm)
+
+            if has_full and spatial_idx is not None:
+                row = (spatial_idx // grid_size) * patch_size
+                col = (spatial_idx % grid_size) * patch_size
+                rect = patches.Rectangle(
+                    (col, row),
+                    patch_size,
+                    patch_size,
+                    linewidth=2.5,
+                    edgecolor="red",
+                    facecolor="none",
+                )
+                ax.add_patch(rect)
+
             ax.set_title(f"Act: {act:.2f}", fontsize=8)
 
     plt.tight_layout()

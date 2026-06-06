@@ -237,6 +237,8 @@ def main():
     grid_features_dict = {}
     layer_saes = {}
     layer_top_features = {}
+    best_layer11_feature_idx = None
+    best_layer11_drop = -float("inf")
     
     # Pre-load CLIP Auto-Labeler once to avoid reloading for every feature/layer
     labeler = CLIPAutoLabeler(device=device)
@@ -336,7 +338,10 @@ def main():
             ablated_logit = logits_ablated[:, predicted_class_idx].mean().item()
             rel_drop = (baseline_logit - ablated_logit) / (abs(baseline_logit) + 1e-8) * 100
             layer_drops.append(rel_drop)
-            
+            if layer == 10:
+                if rel_drop > best_layer11_drop:
+                    best_layer11_drop = rel_drop
+                    best_layer11_feature_idx = f_idx
             # Steering intervention
             logits_steered = perform_causal_intervention(
                 model_wrapper, sae, eval_image, layer_idx=layer, feature_idx=f_idx,
@@ -392,7 +397,12 @@ def main():
     
     # 6. Save unified 5x5 feature grid visualization for Layer 11
     if grid_features_dict:
-        save_feature_grid_visualization(grid_features_dict, "multi_feature_exemplar_grid.png")
+        save_feature_grid_visualization(
+            grid_features_dict,
+            "multi_feature_exemplar_grid.png",
+            patch_size=model_wrapper.patch_size,
+            grid_size=model_wrapper.grid_size,
+        )
         
     # 7. Quantitative CSV Exporter
     csv_file_path = "discovered_features_summary.csv"
@@ -406,21 +416,25 @@ def main():
         writer.writerows(discovered_features_detail)
     logger.info(f"Saved quantitative summary to {csv_file_path}")
     
-    # 8. Plot Dose-Response for a representative feature (Feature 100 on Layer 11)
+    # 8. Plot Dose-Response for a representative feature (Feature with largest causal drop on Layer 11)
     logger.info("Generating Causal Dose-Response curve for representation...")
     layer11_sae = layer_saes[10]
     layer11_features = layer_top_features[10]
+    
+    representative_feat = best_layer11_feature_idx if best_layer11_feature_idx is not None else (layer11_features[0] if layer11_features else 100)
+    logger.info(f"Selected Feature {representative_feat} for Dose-Response curve (ablation drop: {best_layer11_drop:.4f}%)")
+    
     plot_dose_response(
         model_wrapper=model_wrapper,
         sae=layer11_sae,
         images=eval_image,
         layer_idx=10,
-        feature_idx=layer11_features[0] if layer11_features else 100,
+        feature_idx=representative_feat,
         target_class_idx=predicted_class_idx,
         target_type="mlp",
-        save_path="dose_response_curve.png"
+        save_path="dose_response_curve.png",
     )
-    
+
     logger.info("Pipeline execution completed successfully.")
 
 if __name__ == "__main__":
