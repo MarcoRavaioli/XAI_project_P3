@@ -5,7 +5,7 @@ import csv
 import argparse
 import logging
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 import torchvision.transforms as transforms
 from torchvision.transforms import InterpolationMode
 from torchvision.datasets import CIFAR10
@@ -19,8 +19,13 @@ from interpretability import (
     get_top_activating_patches,
     CLIPAutoLabeler,
     save_feature_grid_visualization,
+    save_feature_activation_heatmap,
 )
-from causal_eval import plot_dose_response, perform_causal_intervention
+from causal_eval import (
+    plot_dose_response,
+    perform_causal_intervention,
+    plot_training_curves,
+)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
@@ -79,8 +84,8 @@ def parse_args():
         "--dataset",
         type=str,
         default="cifar10",
-        choices=["cifar10", "imagewoof", "imagenet"],
-        help="Target dataset paradigm ('cifar10', 'imagewoof', 'imagenet')",
+        choices=["cifar10", "imagewoof", "imagenette", "imagenet"],
+        help="Target dataset paradigm ('cifar10', 'imagewoof', 'imagenette', 'imagenet')",
     )
     parser.add_argument(
         "--dataset_path",
@@ -167,6 +172,25 @@ def check_and_download_imagenette(data_dir: str) -> str:
     return _download_fastai_dataset(data_dir, "ImageNette", "imagenette2-320.tgz")
 
 
+class HFImageDataset(Dataset):
+    """Wraps a HuggingFace `datasets` image dataset to be compatible with torchvision transforms."""
+
+    def __init__(self, hf_dataset, transform=None):
+        self.dataset = hf_dataset
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        image = item["image"].convert("RGB")
+        label = item.get("label", 0)
+        if self.transform:
+            image = self.transform(image)
+        return image, label
+
+
 def main():
     args = parse_args()
 
@@ -177,6 +201,10 @@ def main():
 
     # 2. Loading Vision Transformer Backbone
     model_wrapper = ViTModelWrapper(model_name=args.model, device=device)
+
+    # Output directory for all generated artifacts
+    out_dir = "out"
+    os.makedirs(out_dir, exist_ok=True)
 
     # 3. Data Loader setup
     # Lanczos preserves sharp edges when upscaling low-res datasets (e.g. CIFAR 32x32 → 224x224)
@@ -216,10 +244,10 @@ def main():
             dataset = CIFAR10(
                 root="./data", train=False, download=True, transform=cifar_transform
             )
-    elif args.dataset == "imagenet":
+    elif args.dataset == "imagenette":
         try:
             val_dir = check_and_download_imagenette(args.dataset_path)
-            logger.info(f"Setting up ImageNette (ImageNet subset) from {val_dir}...")
+            logger.info(f"Setting up ImageNette (10-class ImageNet subset) from {val_dir}...")
             from torchvision.datasets import ImageFolder
 
             dataset = ImageFolder(root=val_dir, transform=imagenet_style_transform)
@@ -228,6 +256,38 @@ def main():
             dataset = CIFAR10(
                 root="./data", train=False, download=True, transform=cifar_transform
             )
+    elif args.dataset == "imagenet":
+        # ImageNet-100: try local path first, then HuggingFace datasets
+        target_path = args.dataset_path
+        if target_path == "./data":
+            target_path = os.path.join(args.dataset_path, "imagenet-100", "val")
+
+        from torchvision.datasets import ImageFolder
+
+        if os.path.exists(target_path):
+            logger.info(f"Setting up ImageNet-100 from local path {target_path}...")
+            dataset = ImageFolder(root=target_path, transform=imagenet_style_transform)
+        else:
+            try:
+                from datasets import load_dataset
+
+                logger.info(
+                    "Local ImageNet-100 not found. Downloading via HuggingFace datasets..."
+                )
+                hf_ds = load_dataset(
+                    "clane9/imagenet-100", split="validation", trust_remote_code=True
+                )
+                dataset = HFImageDataset(hf_ds, transform=imagenet_style_transform)
+                logger.info(f"ImageNet-100 loaded from HuggingFace ({len(dataset)} images).")
+            except Exception as e:
+                logger.warning(
+                    f"Could not load ImageNet-100: {e}. Falling back to CIFAR-10. "
+                    "To use ImageNet-100, either provide a local path via --dataset_path "
+                    "or install the 'datasets' library (pip install datasets)."
+                )
+                dataset = CIFAR10(
+                    root="./data", train=False, download=True, transform=cifar_transform
+                )
     else:
         target_path = args.dataset_path
         if target_path == "./data":
@@ -268,25 +328,41 @@ def main():
     grid_features_dict = {}
     layer_saes = {}
     layer_top_features = {}
+    layer_histories = {}
     best_layer11_feature_idx = None
     best_layer11_drop = -float("inf")
 
     # Pre-load CLIP Auto-Labeler once to avoid reloading for every feature/layer
     labeler = CLIPAutoLabeler(device=device)
-    candidate_concepts = [
-        "sky",
-        "grass",
-        "metal texture",
-        "fur",
-        "eye",
-        "wheel",
-        "red color",
-        "blue color",
-        "spotted pattern",
-        "striped pattern",
-        "wing",
-        "smooth surface",
-    ]
+    dataset_concepts = {
+        "imagewoof": [
+            "fur", "eye", "nose", "ear", "tongue", "snout",
+            "paw", "tail", "collar", "spotted pattern",
+            "grass", "sky", "person", "leash",
+        ],
+        "imagenette": [
+            "fish", "dog", "car", "church", "cassette player",
+            "chain saw", "golf ball", "parachute", "gas pump", "horn",
+            "sky", "grass", "water", "metal texture", "wood",
+            "wheel", "fur", "eye", "scale pattern", "red color",
+        ],
+        "imagenet": [
+            "animal", "dog", "bird", "fish", "insect", "vehicle",
+            "building", "food", "plant", "furniture", "person",
+            "sky", "water", "grass", "fur", "eye", "wheel",
+            "metal texture", "wood", "stripe", "scale pattern",
+        ],
+        "cifar10": [
+            "airplane", "automobile", "bird", "cat", "deer",
+            "dog", "frog", "horse", "ship", "truck",
+            "sky", "water", "grass", "road", "wheel",
+            "wing", "fur", "eye", "metal texture", "stripe",
+        ],
+    }
+    candidate_concepts = dataset_concepts.get(
+        args.dataset,
+        dataset_concepts["cifar10"],
+    )
 
     # Select first image in dataset for surgical visual intervention evaluation
     first_img_tensor, first_img_label = dataset[0]
@@ -330,6 +406,7 @@ def main():
 
         final_r2 = history[-1]["r2"] if history else 0.0
         final_l0 = history[-1]["l0"] if history else 0.0
+        layer_histories[layer_name] = history
 
         # top 10 most active features for this layer
         top_features = get_top_active_features(
@@ -470,21 +547,22 @@ def main():
 
     print(markdown_table)
 
-    with open("layer_comparison_summary.md", mode="w", encoding="utf-8") as f:
+    summary_path = os.path.join(out_dir, "layer_comparison_summary.md")
+    with open(summary_path, mode="w", encoding="utf-8") as f:
         f.write(markdown_table)
-    logger.info("Saved layer comparison table to layer_comparison_summary.md")
+    logger.info(f"Saved layer comparison table to {summary_path}")
 
     # 6. Save unified 5x5 feature grid visualization for Layer 11
     if grid_features_dict:
         save_feature_grid_visualization(
             grid_features_dict,
-            "multi_feature_exemplar_grid.png",
+            os.path.join(out_dir, "multi_feature_exemplar_grid.png"),
             patch_size=model_wrapper.patch_size,
             grid_size=model_wrapper.grid_size,
         )
 
     # 7. Quantitative CSV Exporter
-    csv_file_path = "discovered_features_summary.csv"
+    csv_file_path = os.path.join(out_dir, "discovered_features_summary.csv")
     with open(csv_file_path, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f,
@@ -525,8 +603,25 @@ def main():
         feature_idx=representative_feat,
         target_class_idx=predicted_class_idx,
         target_type="mlp",
-        save_path="dose_response_curve.png",
+        save_path=os.path.join(out_dir, "dose_response_curve.png"),
     )
+
+    # 9. Plot SAE training convergence curves
+    if layer_histories:
+        plot_training_curves(layer_histories, save_path=os.path.join(out_dir, "sae_training_curves.png"))
+
+    # 10. Generate spatial activation heatmap for the most causally active Layer 11 feature
+    if best_layer11_feature_idx is not None:
+        save_feature_activation_heatmap(
+            model_wrapper=model_wrapper,
+            sae=layer11_sae,
+            image=first_img_tensor,
+            layer_idx=10,
+            feature_idx=best_layer11_feature_idx,
+            target_type="mlp",
+            save_path=os.path.join(out_dir, "feature_activation_heatmap.png"),
+            device=device,
+        )
 
     logger.info("Pipeline execution completed successfully.")
 

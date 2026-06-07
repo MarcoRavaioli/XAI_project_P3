@@ -220,3 +220,37 @@ def plot_dose_response(
     plt.savefig(save_path, dpi=150)
     plt.close()
     logger.info(f"Dose-response plot saved to {save_path}")
+
+def plot_training_curves(
+    all_histories: dict,
+    save_path: str = "sae_training_curves.png",
+):
+    """
+    Plots SAE training convergence curves for cross-layer comparison.
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+    metrics = [("loss", "Training Loss"), ("r2", "R² Score"), ("l0", "L₀ Sparsity")]
+    colors = ["#e06666", "#6fa8dc", "#93c47d", "#f6b26b"]
+
+    for idx, (key, title) in enumerate(metrics):
+        ax = axes[idx]
+        for i, (layer_name, history) in enumerate(all_histories.items()):
+            epochs = [h["epoch"] for h in history]
+            values = [h[key] for h in history]
+            ax.plot(
+                epochs, values,
+                marker="o", linewidth=2, markersize=5,
+                color=colors[i % len(colors)],
+                label=layer_name,
+            )
+        ax.set_title(title, fontsize=11, fontweight="bold")
+        ax.set_xlabel("Epoch", fontsize=9)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend(fontsize=8)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    logger.info(f"Training curves saved to {save_path}")

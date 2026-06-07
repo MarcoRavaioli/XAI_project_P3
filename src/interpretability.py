@@ -319,3 +319,88 @@ def save_feature_grid_visualization(
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"Multi-feature exemplar grid saved to {output_path}")
+
+def save_feature_activation_heatmap(
+    model_wrapper: ViTModelWrapper,
+    sae: SparseAutoencoder,
+    image: torch.Tensor,
+    layer_idx: int,
+    feature_idx: int,
+    target_type: str = "mlp",
+    save_path: str = "feature_heatmap.png",
+    device: str = "cpu",
+):
+    """
+    Generates a spatial activation heatmap overlay for a single SAE feature on a source image.
+    Each of the 196 patches gets colored by its feature activation intensity.
+    """
+    import matplotlib
+
+    matplotlib.use("agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import Normalize
+
+    sae.eval()
+    grid_size = model_wrapper.grid_size
+
+    submodule = model_wrapper.get_submodule(layer_idx, target_type)
+    hook = ActivationHook(submodule)
+    hook.register()
+
+    img_input = image.unsqueeze(0).to(device) if image.dim() == 3 else image.to(device)
+
+    with torch.no_grad():
+        _ = model_wrapper.model(img_input)
+        activation = hook.activation
+    hook.remove()
+
+    if activation is None:
+        logger.warning("No activation captured for heatmap.")
+        return
+
+    patch_tokens = activation[:, 1:, :]
+    f = sae.encode(patch_tokens)  # [1, 196, hidden_dim]
+    feature_acts = f[0, :, feature_idx].cpu().numpy()  # [196]
+
+    heatmap = feature_acts.reshape(grid_size, grid_size)
+
+    # unnormalize source image for display
+    mean = np.array([0.485, 0.456, 0.406])
+    std = np.array([0.229, 0.224, 0.225])
+    img_np = image.cpu().numpy() if image.dim() == 3 else image[0].cpu().numpy()
+    img_display = np.transpose(img_np, (1, 2, 0))
+    img_display = img_display * std + mean
+    img_display = np.clip(img_display, 0, 1)
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+
+    axes[0].imshow(img_display)
+    axes[0].set_title("Source Image", fontsize=10, fontweight="bold")
+    axes[0].axis("off")
+
+    im = axes[1].imshow(heatmap, cmap="hot", interpolation="nearest")
+    axes[1].set_title(f"Feature {feature_idx} Activation Map", fontsize=10, fontweight="bold")
+    axes[1].axis("off")
+    plt.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
+
+    axes[2].imshow(img_display)
+    import matplotlib.image as mimg
+    from PIL import Image as PILImage
+
+    heatmap_resized = np.array(
+        PILImage.fromarray(
+            (Normalize(vmin=heatmap.min(), vmax=heatmap.max() + 1e-8)(heatmap) * 255).astype(np.uint8)
+        ).resize((img_display.shape[1], img_display.shape[0]), PILImage.BILINEAR)
+    ) / 255.0
+    axes[2].imshow(heatmap_resized, cmap="hot", alpha=0.5)
+    axes[2].set_title("Overlay", fontsize=10, fontweight="bold")
+    axes[2].axis("off")
+
+    plt.suptitle(
+        f"SAE Feature {feature_idx} — Spatial Activation Heatmap (Layer {layer_idx + 1})",
+        fontsize=12, fontweight="bold",
+    )
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    logger.info(f"Feature activation heatmap saved to {save_path}")
