@@ -51,7 +51,11 @@ def parse_args():
         help="0-indexed layers targeting block depth (5 = Layer 6, 10 = Layer 11)",
     )
     parser.add_argument(
-        "--epochs", type=int, default=1, help="Number of training epochs for SAE"
+        "--epochs",
+        type=int,
+        nargs="+",
+        default=[1],
+        help="Number of training epochs for SAE (can specify multiple values mapped to each layer)",
     )
     parser.add_argument(
         "--l1_coeff",
@@ -500,10 +504,13 @@ def main():
         ).to(device)
 
         # Train SAE
+        epochs_val = args.epochs[i] if i < len(args.epochs) else args.epochs[-1]
+        logger.info(f"Using {epochs_val} epochs for {layer_name}")
+
         history = train_sae(
             sae=sae,
             activation_buffer=activation_buffer,
-            epochs=args.epochs,
+            epochs=epochs_val,
             l1_coeff=l1_val,
             lr=1e-3,
             device=device,
