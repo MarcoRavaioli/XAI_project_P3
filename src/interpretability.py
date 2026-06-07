@@ -232,6 +232,7 @@ def get_feature_activation_map(
     feature_idx: int,
     target_type: str = "mlp",
     device: str = "cpu",
+    activation_cache: Dict[Tuple[int, int], torch.Tensor] = None,
 ) -> np.ndarray:
     """
     Computes a 2D grid of feature activation intensities for a single image.
@@ -240,20 +241,32 @@ def get_feature_activation_map(
     sae.eval()
     grid_size = model_wrapper.grid_size
 
-    submodule = model_wrapper.get_submodule(layer_idx, target_type)
-    hook = ActivationHook(submodule)
-    hook.register()
-
-    img_input = image.unsqueeze(0).to(device) if image.dim() == 3 else image.to(device)
-
-    with torch.no_grad():
-        _ = model_wrapper.model(img_input)
-        activation = hook.activation
-    hook.remove()
+    activation = None
+    if activation_cache is not None:
+        cache_key = (layer_idx, id(image))
+        if cache_key in activation_cache:
+            activation = activation_cache[cache_key]
 
     if activation is None:
-        logger.warning("No activation captured for heatmap.")
-        return np.zeros((grid_size, grid_size))
+        submodule = model_wrapper.get_submodule(layer_idx, target_type)
+        hook = ActivationHook(submodule)
+        hook.register()
+
+        img_input = (
+            image.unsqueeze(0).to(device) if image.dim() == 3 else image.to(device)
+        )
+
+        with torch.no_grad():
+            _ = model_wrapper.model(img_input)
+            activation = hook.activation
+        hook.remove()
+
+        if activation is None:
+            logger.warning("No activation captured for heatmap.")
+            return np.zeros((grid_size, grid_size))
+
+        if activation_cache is not None:
+            activation_cache[cache_key] = activation
 
     with torch.no_grad():
         patch_tokens = activation[:, 1:, :]
@@ -295,6 +308,9 @@ def save_feature_grid_visualization(
     feature_indices = list(top_features_dict.keys())
     num_features = len(feature_indices)
 
+    # Initialize shared activation cache for all features being plotted in this layer grid
+    activation_cache = {}
+
     fig, axes = plt.subplots(num_features * 3, 5, figsize=(15, num_features * 3 * 2.5))
 
     for r in range(num_features):
@@ -302,6 +318,30 @@ def save_feature_grid_visualization(
         feat_data = top_features_dict[feat_idx]
         exemplars = feat_data.get("exemplars", [])
         concept = feat_data.get("concept", "unknown")
+
+        # Precompute heatmaps for all exemplars of this feature to find global_max and avoid duplicate forward passes
+        heatmaps = []
+        for ex in exemplars:
+            if "full_image" in ex:
+                hm = get_feature_activation_map(
+                    model_wrapper=model_wrapper,
+                    sae=sae,
+                    image=ex["full_image"],
+                    layer_idx=layer_idx,
+                    feature_idx=feat_idx,
+                    target_type="mlp",
+                    device=device,
+                    activation_cache=activation_cache,
+                )
+                heatmaps.append(hm)
+            else:
+                heatmaps.append(None)
+
+        # Find global max activation for this feature's heatmaps (for consistent row-level color scaling)
+        valid_maxes = [hm.max() for hm in heatmaps if hm is not None]
+        global_max = max(valid_maxes) if valid_maxes else 1.0
+        if global_max <= 0.0:
+            global_max = 1.0
 
         # Set row labels on the left column (column 0)
         axes[r * 3 + 0, 0].set_ylabel(
@@ -393,24 +433,13 @@ def save_feature_grid_visualization(
                 ax_full.add_patch(rect)
 
             # --- Row 3: Heatmap Overlay ---
-            if has_full:
-                heatmap = get_feature_activation_map(
-                    model_wrapper=model_wrapper,
-                    sae=sae,
-                    image=img_tensor,
-                    layer_idx=layer_idx,
-                    feature_idx=feat_idx,
-                    target_type="mlp",
-                    device=device,
-                )
+            heatmap = heatmaps[c] if c < len(heatmaps) else None
+            if has_full and heatmap is not None:
                 heatmap_resized = (
                     np.array(
                         PILImage.fromarray(
                             (
-                                Normalize(
-                                    vmin=heatmap.min(), vmax=heatmap.max() + 1e-8
-                                )(heatmap)
-                                * 255
+                                Normalize(vmin=0.0, vmax=global_max)(heatmap) * 255
                             ).astype(np.uint8)
                         ).resize(
                             (img_unnorm.shape[1], img_unnorm.shape[0]),

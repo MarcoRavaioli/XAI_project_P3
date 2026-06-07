@@ -334,7 +334,6 @@ def main():
     layers_to_compare = [5, 10]  # Layer 6 and Layer 11
     layer_comparison_summary = []
     discovered_features_detail = []
-    grid_features_dict = {}
     layer_saes = {}
     layer_top_features = {}
     layer_histories = {}
@@ -399,7 +398,7 @@ def main():
             "striped pattern",
             "spotted pattern",
             "geometric pattern",
-            "yellow color",
+            "pineapple",
             "eye",
             "face",
             "scale pattern",
@@ -484,6 +483,8 @@ def main():
             l1_val = args.l1_coeff[-1]
 
         logger.info(f"Using L1 coefficient {l1_val:.2e} for {layer_name}")
+
+        layer_grid_features_dict = {}
 
         activation_buffer = TokenActivationBuffer(
             model_wrapper=model_wrapper,
@@ -609,8 +610,8 @@ def main():
             }
             discovered_features_detail.append(feat_result)
 
-            if layer == 10 and len(grid_features_dict) < 5:
-                grid_features_dict[f_idx] = {
+            if len(layer_grid_features_dict) < 5:
+                layer_grid_features_dict[f_idx] = {
                     "exemplars": exemplars,
                     "concept": best_concept,
                 }
@@ -625,6 +626,28 @@ def main():
                 "Mean Logit Drop": f"{mean_logit_drop:.4f}%",
             }
         )
+
+        # Save unified feature grid visualization for the current layer
+        if layer_grid_features_dict:
+            grid_path = os.path.join(
+                out_dir, f"multi_feature_exemplar_grid_layer{layer + 1}.png"
+            )
+            save_feature_grid_visualization(
+                model_wrapper=model_wrapper,
+                sae=sae,
+                top_features_dict=layer_grid_features_dict,
+                output_path=grid_path,
+                layer_idx=layer,
+                patch_size=model_wrapper.patch_size,
+                grid_size=model_wrapper.grid_size,
+                device=device,
+            )
+            if layer == 10:
+                import shutil
+
+                shutil.copy(
+                    grid_path, os.path.join(out_dir, "multi_feature_exemplar_grid.png")
+                )
 
     # 5. summary table to stdout and file
     markdown_table = (
@@ -655,19 +678,6 @@ def main():
     with open(summary_path, mode="w", encoding="utf-8") as f:
         f.write(markdown_table)
     logger.info(f"Saved layer comparison table to {summary_path}")
-
-    # 6. Save unified feature grid visualization for Layer 11
-    if grid_features_dict:
-        save_feature_grid_visualization(
-            model_wrapper=model_wrapper,
-            sae=layer_saes[10],
-            top_features_dict=grid_features_dict,
-            output_path=os.path.join(out_dir, "multi_feature_exemplar_grid.png"),
-            layer_idx=10,
-            patch_size=model_wrapper.patch_size,
-            grid_size=model_wrapper.grid_size,
-            device=device,
-        )
 
     # 7. Quantitative CSV Exporter
     csv_file_path = os.path.join(out_dir, "discovered_features_summary.csv")
