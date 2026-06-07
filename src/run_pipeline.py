@@ -56,8 +56,9 @@ def parse_args():
     parser.add_argument(
         "--l1_coeff",
         type=float,
-        default=1e-3,
-        help="L1 coefficient scaling weight of feature sparsity",
+        nargs="+",
+        default=[1e-3],
+        help="L1 coefficient scaling weight of feature sparsity (can specify multiple values mapped to each layer)",
     )
     parser.add_argument(
         "--expansion",
@@ -407,9 +408,18 @@ def main():
         f"Image {eval_idx} predicted class index: {predicted_class_idx} (Label index: {first_img_label})"
     )
 
-    for layer in layers_to_compare:
+    for i, layer in enumerate(layers_to_compare):
         layer_name = f"Layer {layer + 1}"
         logger.info(f"\n" + "=" * 50 + f"\nPROCESSING LAYER: {layer_name}\n" + "=" * 50)
+        
+        # Determine L1 coefficient based on position in layers_to_compare (index i)
+        if i < len(args.l1_coeff):
+            l1_val = args.l1_coeff[i]
+        else:
+            l1_val = args.l1_coeff[-1]
+            
+        logger.info(f"Using L1 coefficient {l1_val:.2e} for {layer_name}")
+
         activation_buffer = TokenActivationBuffer(
             model_wrapper=model_wrapper,
             dataloader=dataloader,
@@ -428,7 +438,7 @@ def main():
             sae=sae,
             activation_buffer=activation_buffer,
             epochs=args.epochs,
-            l1_coeff=args.l1_coeff,
+            l1_coeff=l1_val,
             lr=1e-3,
             device=device,
         )
