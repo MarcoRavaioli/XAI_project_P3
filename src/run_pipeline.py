@@ -93,6 +93,12 @@ def parse_args():
         default="./data",
         help="Local file path directory for custom datasets",
     )
+    parser.add_argument(
+        "--eval_image_idx",
+        type=int,
+        default=0,
+        help="Index of the image in the dataset to use for surgical evaluation",
+    )
     return parser.parse_args()
 
 
@@ -364,9 +370,29 @@ def main():
         dataset_concepts["cifar10"],
     )
 
-    # Select first image in dataset for surgical visual intervention evaluation
-    first_img_tensor, first_img_label = dataset[0]
+    # Select evaluation image from dataset for surgical visual intervention evaluation
+    eval_idx = args.eval_image_idx
+    if eval_idx < 0 or eval_idx >= len(dataset):
+        logger.warning(
+            f"Evaluation image index {eval_idx} is out of bounds for dataset of size {len(dataset)}. "
+            f"Defaulting to index 0."
+        )
+        eval_idx = 0
+
+    first_img_tensor, first_img_label = dataset[eval_idx]
     eval_image = first_img_tensor.unsqueeze(0).to(device)  # shape: [1, 3, 224, 224]
+
+    class_name = "unknown"
+    if hasattr(dataset, "classes") and dataset.classes is not None:
+        try:
+            class_name = dataset.classes[first_img_label]
+        except Exception:
+            pass
+    elif hasattr(dataset, "dataset") and hasattr(dataset.dataset, "features") and "label" in dataset.dataset.features:
+        try:
+            class_name = dataset.dataset.features["label"].int2str(first_img_label)
+        except Exception:
+            pass
 
     # Get baseline class prediction for eval_image
     with torch.no_grad():
@@ -375,7 +401,10 @@ def main():
         predicted_class_idx = logits.argmax(dim=-1).item()
 
     logger.info(
-        f"Image 0 predicted class index: {predicted_class_idx} (Label index: {first_img_label})"
+        f"Selected evaluation image at index {eval_idx} (Label index: {first_img_label}, Class: {class_name})"
+    )
+    logger.info(
+        f"Image {eval_idx} predicted class index: {predicted_class_idx} (Label index: {first_img_label})"
     )
 
     for layer in layers_to_compare:

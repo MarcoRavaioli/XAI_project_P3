@@ -358,9 +358,10 @@ def save_feature_activation_heatmap(
         logger.warning("No activation captured for heatmap.")
         return
 
-    patch_tokens = activation[:, 1:, :]
-    f = sae.encode(patch_tokens)  # [1, 196, hidden_dim]
-    feature_acts = f[0, :, feature_idx].cpu().numpy()  # [196]
+    with torch.no_grad():
+        patch_tokens = activation[:, 1:, :]
+        f = sae.encode(patch_tokens)  # [1, 196, hidden_dim]
+        feature_acts = f[0, :, feature_idx].detach().cpu().numpy()  # [196]
 
     heatmap = feature_acts.reshape(grid_size, grid_size)
 
