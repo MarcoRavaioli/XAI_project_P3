@@ -281,7 +281,7 @@ def main():
                     "Local ImageNet-100 not found. Downloading via HuggingFace datasets..."
                 )
                 hf_ds = load_dataset(
-                    "clane9/imagenet-100", split="validation", trust_remote_code=True
+                    "clane9/imagenet-100", split="validation"
                 )
                 dataset = HFImageDataset(hf_ds, transform=imagenet_style_transform)
                 logger.info(f"ImageNet-100 loaded from HuggingFace ({len(dataset)} images).")
