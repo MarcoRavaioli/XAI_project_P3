@@ -1,11 +1,13 @@
 import os
-os.environ['MPLBACKEND'] = 'agg'
+
+os.environ["MPLBACKEND"] = "agg"
 import csv
 import argparse
 import logging
 import torch
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
+from torchvision.transforms import InterpolationMode
 from torchvision.datasets import CIFAR10
 
 from typing import List
@@ -13,80 +15,81 @@ from typing import List
 from model_loader import set_seed, ViTModelWrapper, ActivationHook
 from sae import SparseAutoencoder
 from caching_and_training import TokenActivationBuffer, train_sae
-from interpretability import get_top_activating_patches, CLIPAutoLabeler, save_feature_grid_visualization
+from interpretability import (
+    get_top_activating_patches,
+    CLIPAutoLabeler,
+    save_feature_grid_visualization,
+)
 from causal_eval import plot_dose_response, perform_causal_intervention
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
 )
 logger = logging.getLogger("run_pipeline")
 
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="Mechanistic Interpretability Pipeline with Sparse Autoencoders")
+    parser = argparse.ArgumentParser(
+        description="Mechanistic Interpretability Pipeline with Sparse Autoencoders"
+    )
     parser.add_argument(
-        "--model", 
-        type=str, 
+        "--model",
+        type=str,
         default="google/vit-base-patch16-224",
         choices=["google/vit-base-patch16-224", "facebook/dinov2-base"],
-        help="Hugging Face model checkpoint backbone"
+        help="Hugging Face model checkpoint backbone",
     )
     parser.add_argument(
-        "--layer", 
-        type=int, 
-        default=5, 
-        help="0-indexed layers targeting block depth (5 = Layer 6, 10 = Layer 11)"
+        "--layer",
+        type=int,
+        default=5,
+        help="0-indexed layers targeting block depth (5 = Layer 6, 10 = Layer 11)",
     )
     parser.add_argument(
-        "--epochs", 
-        type=int, 
-        default=1, 
-        help="Number of training epochs for SAE"
+        "--epochs", type=int, default=1, help="Number of training epochs for SAE"
     )
     parser.add_argument(
-        "--l1_coeff", 
-        type=float, 
-        default=1e-3, 
-        help="L1 coefficient scaling weight of feature sparsity"
+        "--l1_coeff",
+        type=float,
+        default=1e-3,
+        help="L1 coefficient scaling weight of feature sparsity",
     )
     parser.add_argument(
-        "--expansion", 
-        type=int, 
-        default=8, 
-        help="Overcomplete expansion ratio (hidden_dim = F * d_model)"
+        "--expansion",
+        type=int,
+        default=8,
+        help="Overcomplete expansion ratio (hidden_dim = F * d_model)",
     )
     parser.add_argument(
-        "--subset_size", 
-        type=int, 
-        default=50, 
-        help="Size of subset for rapid pipeline testing"
+        "--subset_size",
+        type=int,
+        default=50,
+        help="Size of subset for rapid pipeline testing",
     )
     parser.add_argument(
-        "--feature_idx", 
-        type=int, 
-        default=100, 
-        help="SAE hidden feature index to analyze & causally ablate"
+        "--feature_idx",
+        type=int,
+        default=100,
+        help="SAE hidden feature index to analyze & causally ablate",
     )
     parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        help="Device to run on ('cpu', 'cuda')"
+        "--device", type=str, default="cpu", help="Device to run on ('cpu', 'cuda')"
     )
     parser.add_argument(
         "--dataset",
         type=str,
         default="cifar10",
         choices=["cifar10", "imagewoof", "imagenet"],
-        help="Target dataset paradigm ('cifar10', 'imagewoof', 'imagenet')"
+        help="Target dataset paradigm ('cifar10', 'imagewoof', 'imagenet')",
     )
     parser.add_argument(
         "--dataset_path",
         type=str,
         default="./data",
-        help="Local file path directory for custom datasets"
+        help="Local file path directory for custom datasets",
     )
     return parser.parse_args()
+
 
 def get_top_active_features(
     model_wrapper: ViTModelWrapper,
@@ -95,7 +98,7 @@ def get_top_active_features(
     layer_idx: int,
     num_features: int = 10,
     target_type: str = "mlp",
-    device: str = "cpu"
+    device: str = "cpu",
 ) -> List[int]:
     """
     Identifies the top N most active features across the dataset based on mean activation.
@@ -104,10 +107,10 @@ def get_top_active_features(
     submodule = model_wrapper.get_submodule(layer_idx, target_type)
     hook = ActivationHook(submodule)
     hook.register()
-    
+
     total_activations = torch.zeros(sae.hidden_dim, device=device)
     total_tokens = 0
-    
+
     with torch.no_grad():
         for batch in dataloader:
             images = batch[0].to(device)
@@ -117,121 +120,149 @@ def get_top_active_features(
                 continue
             # Discard CLS token (index 0)
             patch_tokens = activation[:, 1:, :]
-            f = sae.encode(patch_tokens) # [batch, num_patches, hidden_dim]
+            f = sae.encode(patch_tokens)  # [batch, num_patches, hidden_dim]
             total_activations += f.sum(dim=(0, 1))
             total_tokens += patch_tokens.shape[0] * patch_tokens.shape[1]
-            
+
     hook.remove()
     mean_activations = total_activations / (total_tokens + 1e-8)
     top_values, top_indices = torch.topk(mean_activations, k=num_features)
     return top_indices.cpu().tolist()
 
-def check_and_download_imagewoof(data_dir: str) -> str:
+
+def _download_fastai_dataset(data_dir: str, name: str, archive: str) -> str:
+    """Generic downloader for fast.ai ImageNet subsets (imagewoof, imagenette)."""
     import urllib.request
     import tarfile
-    
-    dataset_dir = os.path.join(data_dir, "imagewoof2-320")
+
+    dataset_dir = os.path.join(data_dir, archive.replace(".tgz", ""))
     val_dir = os.path.join(dataset_dir, "val")
-    
+
     if os.path.exists(val_dir):
         return val_dir
-        
+
     os.makedirs(data_dir, exist_ok=True)
-    tar_path = os.path.join(data_dir, "imagewoof2-320.tgz")
-    url = "https://s3.amazonaws.com/fast-ai-imageclas/imagewoof2-320.tgz"
-    
+    tar_path = os.path.join(data_dir, archive)
+    url = f"https://s3.amazonaws.com/fast-ai-imageclas/{archive}"
+
     try:
-        logger.info(f"ImageWoof not found at {val_dir}. Auto-downloading from {url}...")
+        logger.info(f"{name} not found at {val_dir}. Auto-downloading from {url}...")
         urllib.request.urlretrieve(url, tar_path)
-        logger.info("Extracting ImageWoof dataset...")
+        logger.info(f"Extracting {name} dataset...")
         with tarfile.open(tar_path, "r:gz") as tar:
             tar.extractall(path=data_dir)
         os.remove(tar_path)
-        logger.info(f"ImageWoof setup completed at {val_dir}.")
+        logger.info(f"{name} setup completed at {val_dir}.")
         return val_dir
     except Exception as e:
-        logger.error(f"Failed to auto-download ImageWoof: {e}")
+        logger.error(f"Failed to auto-download {name}: {e}")
         raise e
+
+
+def check_and_download_imagewoof(data_dir: str) -> str:
+    return _download_fastai_dataset(data_dir, "ImageWoof", "imagewoof2-320.tgz")
+
+
+def check_and_download_imagenette(data_dir: str) -> str:
+    return _download_fastai_dataset(data_dir, "ImageNette", "imagenette2-320.tgz")
+
 
 def main():
     args = parse_args()
-    
+
     # 1. Reproducibility & Device Configuration
     set_seed(42)
     device = args.device
     logger.info(f"Running pipeline on target device: {device}")
-    
+
     # 2. Loading Vision Transformer Backbone
     model_wrapper = ViTModelWrapper(model_name=args.model, device=device)
-    
+
     # 3. Data Loader setup
-    if args.dataset == "cifar10":
-        transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+    # Lanczos preserves sharp edges when upscaling low-res datasets (e.g. CIFAR 32x32 → 224x224)
+    cifar_transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224), interpolation=InterpolationMode.LANCZOS),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-        logger.info("Setting up CIFAR-10 test dataset...")
-        dataset = CIFAR10(root=args.dataset_path, train=False, download=True, transform=transform)
-    else:
-        # Standard ImageNet-style preprocessing preserves aspect ratio before cropping
-        transform = transforms.Compose([
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+    imagenet_style_transform = transforms.Compose(
+        [
             transforms.Resize(256),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-        
-        if args.dataset == "imagewoof":
-            try:
-                val_dir = check_and_download_imagewoof(args.dataset_path)
-                logger.info(f"Setting up ImageWoof dataset from {val_dir}...")
-                from torchvision.datasets import ImageFolder
-                dataset = ImageFolder(root=val_dir, transform=transform)
-            except Exception as e:
-                logger.warning(f"Could not load ImageWoof: {e}. Falling back to downloading CIFAR-10.")
-                cifar_transform = transforms.Compose([
-                    transforms.Resize((224, 224)),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                ])
-                dataset = CIFAR10(root="./data", train=False, download=True, transform=cifar_transform)
-        else:
-            # Determine dataset-specific target path if the generic root is used
-            target_path = args.dataset_path
-            if target_path == "./data":
-                target_path = os.path.join(args.dataset_path, args.dataset)
-                
-            logger.info(f"Setting up {args.dataset} dataset from path {target_path}...")
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+
+    if args.dataset == "cifar10":
+        logger.info("Setting up CIFAR-10 test dataset (Lanczos upscaling)...")
+        dataset = CIFAR10(
+            root=args.dataset_path,
+            train=False,
+            download=True,
+            transform=cifar_transform,
+        )
+    elif args.dataset == "imagewoof":
+        try:
+            val_dir = check_and_download_imagewoof(args.dataset_path)
+            logger.info(f"Setting up ImageWoof dataset from {val_dir}...")
             from torchvision.datasets import ImageFolder
-            if os.path.exists(target_path):
-                try:
-                    dataset = ImageFolder(root=target_path, transform=transform)
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to load ImageFolder at {target_path} due to: {e}. "
-                        "Falling back to downloading CIFAR-10."
-                    )
-                    cifar_transform = transforms.Compose([
-                        transforms.Resize((224, 224)),
-                        transforms.ToTensor(),
-                        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                    ])
-                    dataset = CIFAR10(root="./data", train=False, download=True, transform=cifar_transform)
-            else:
-                logger.warning(f"Dataset path {target_path} not found. Falling back to downloading CIFAR-10.")
-                cifar_transform = transforms.Compose([
-                    transforms.Resize((224, 224)),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-                ])
-                dataset = CIFAR10(root="./data", train=False, download=True, transform=cifar_transform)
-            
-    subset = torch.utils.data.Subset(dataset, range(min(args.subset_size, len(dataset))))
+
+            dataset = ImageFolder(root=val_dir, transform=imagenet_style_transform)
+        except Exception as e:
+            logger.warning(f"Could not load ImageWoof: {e}. Falling back to CIFAR-10.")
+            dataset = CIFAR10(
+                root="./data", train=False, download=True, transform=cifar_transform
+            )
+    elif args.dataset == "imagenet":
+        try:
+            val_dir = check_and_download_imagenette(args.dataset_path)
+            logger.info(f"Setting up ImageNette (ImageNet subset) from {val_dir}...")
+            from torchvision.datasets import ImageFolder
+
+            dataset = ImageFolder(root=val_dir, transform=imagenet_style_transform)
+        except Exception as e:
+            logger.warning(f"Could not load ImageNette: {e}. Falling back to CIFAR-10.")
+            dataset = CIFAR10(
+                root="./data", train=False, download=True, transform=cifar_transform
+            )
+    else:
+        target_path = args.dataset_path
+        if target_path == "./data":
+            target_path = os.path.join(args.dataset_path, args.dataset)
+
+        logger.info(f"Setting up {args.dataset} dataset from path {target_path}...")
+        from torchvision.datasets import ImageFolder
+
+        if os.path.exists(target_path):
+            try:
+                dataset = ImageFolder(
+                    root=target_path, transform=imagenet_style_transform
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load ImageFolder at {target_path}: {e}. Falling back to CIFAR-10."
+                )
+                dataset = CIFAR10(
+                    root="./data", train=False, download=True, transform=cifar_transform
+                )
+        else:
+            logger.warning(
+                f"Dataset path {target_path} not found. Falling back to CIFAR-10."
+            )
+            dataset = CIFAR10(
+                root="./data", train=False, download=True, transform=cifar_transform
+            )
+
+    subset = torch.utils.data.Subset(
+        dataset, range(min(args.subset_size, len(dataset)))
+    )
     dataloader = DataLoader(subset, batch_size=8, shuffle=False)
-    
+
     # 4. Multi-Layer Comparative Loop
-    layers_to_compare = [5, 10] # Layer 6 and Layer 11
+    layers_to_compare = [5, 10]  # Layer 6 and Layer 11
     layer_comparison_summary = []
     discovered_features_detail = []
     grid_features_dict = {}
@@ -239,30 +270,41 @@ def main():
     layer_top_features = {}
     best_layer11_feature_idx = None
     best_layer11_drop = -float("inf")
-    
+
     # Pre-load CLIP Auto-Labeler once to avoid reloading for every feature/layer
     labeler = CLIPAutoLabeler(device=device)
     candidate_concepts = [
-        "sky", "grass", "metal texture", "fur", "eye", 
-        "wheel", "red color", "blue color", "spotted pattern", 
-        "striped pattern", "wing", "smooth surface"
+        "sky",
+        "grass",
+        "metal texture",
+        "fur",
+        "eye",
+        "wheel",
+        "red color",
+        "blue color",
+        "spotted pattern",
+        "striped pattern",
+        "wing",
+        "smooth surface",
     ]
-    
+
     # Select first image in dataset for surgical visual intervention evaluation
     first_img_tensor, first_img_label = dataset[0]
     eval_image = first_img_tensor.unsqueeze(0).to(device)  # shape: [1, 3, 224, 224]
-    
+
     # Get baseline class prediction for eval_image
     with torch.no_grad():
         out = model_wrapper.model(eval_image)
         logits = out.logits if hasattr(out, "logits") else out.last_hidden_state[:, 0]
         predicted_class_idx = logits.argmax(dim=-1).item()
-    
-    logger.info(f"Image 0 predicted class index: {predicted_class_idx} (Label index: {first_img_label})")
-    
+
+    logger.info(
+        f"Image 0 predicted class index: {predicted_class_idx} (Label index: {first_img_label})"
+    )
+
     for layer in layers_to_compare:
-        layer_name = f"Layer {layer+1}"
-        logger.info(f"\n" + "="*50 + f"\nPROCESSING LAYER: {layer_name}\n" + "="*50)
+        layer_name = f"Layer {layer + 1}"
+        logger.info(f"\n" + "=" * 50 + f"\nPROCESSING LAYER: {layer_name}\n" + "=" * 50)
         activation_buffer = TokenActivationBuffer(
             model_wrapper=model_wrapper,
             dataloader=dataloader,
@@ -270,14 +312,12 @@ def main():
             target_type="mlp",
             buffer_size=8192,
             sae_batch_size=256,
-            device=device
+            device=device,
         )
         sae = SparseAutoencoder(
-            d_model=model_wrapper.d_model,
-            expansion_factor=args.expansion,
-            tied=False
+            d_model=model_wrapper.d_model, expansion_factor=args.expansion, tied=False
         ).to(device)
-        
+
         # Train SAE
         history = train_sae(
             sae=sae,
@@ -285,12 +325,12 @@ def main():
             epochs=args.epochs,
             l1_coeff=args.l1_coeff,
             lr=1e-3,
-            device=device
+            device=device,
         )
-        
+
         final_r2 = history[-1]["r2"] if history else 0.0
         final_l0 = history[-1]["l0"] if history else 0.0
-        
+
         # top 10 most active features for this layer
         top_features = get_top_active_features(
             model_wrapper=model_wrapper,
@@ -299,16 +339,18 @@ def main():
             layer_idx=layer,
             num_features=10,
             target_type="mlp",
-            device=device
+            device=device,
         )
-        
-        logger.info(f"Top 10 active features identified for {layer_name}: {top_features}")
-        
+
+        logger.info(
+            f"Top 10 active features identified for {layer_name}: {top_features}"
+        )
+
         layer_saes[layer] = sae
         layer_top_features[layer] = top_features
-        
+
         layer_drops = []
-        
+
         for idx, f_idx in enumerate(top_features):
             exemplars = get_top_activating_patches(
                 model_wrapper=model_wrapper,
@@ -318,38 +360,62 @@ def main():
                 feature_idx=f_idx,
                 k=5,
                 target_type="mlp",
-                device=device
+                device=device,
             )
-            
+
             # Auto-label with CLIP
-            best_concept, best_score, all_scores = labeler.label_feature(exemplars, candidate_concepts)
-            
+            best_concept, best_score, all_scores = labeler.label_feature(
+                exemplars, candidate_concepts
+            )
+
             # Baseline logit
             with torch.no_grad():
                 out_baseline = model_wrapper.model(eval_image)
-                logits_base = out_baseline.logits if hasattr(out_baseline, "logits") else out_baseline.last_hidden_state[:, 0]
+                logits_base = (
+                    out_baseline.logits
+                    if hasattr(out_baseline, "logits")
+                    else out_baseline.last_hidden_state[:, 0]
+                )
                 baseline_logit = logits_base[:, predicted_class_idx].mean().item()
-                
+
             # Ablation intervention
             logits_ablated = perform_causal_intervention(
-                model_wrapper, sae, eval_image, layer_idx=layer, feature_idx=f_idx,
-                intervention_type="ablation", scaling_factor=0.0, target_type="mlp"
+                model_wrapper,
+                sae,
+                eval_image,
+                layer_idx=layer,
+                feature_idx=f_idx,
+                intervention_type="ablation",
+                scaling_factor=0.0,
+                target_type="mlp",
             )
             ablated_logit = logits_ablated[:, predicted_class_idx].mean().item()
-            rel_drop = (baseline_logit - ablated_logit) / (abs(baseline_logit) + 1e-8) * 100
+            rel_drop = (
+                (baseline_logit - ablated_logit) / (abs(baseline_logit) + 1e-8) * 100
+            )
             layer_drops.append(rel_drop)
+
             if layer == 10:
                 if rel_drop > best_layer11_drop:
                     best_layer11_drop = rel_drop
                     best_layer11_feature_idx = f_idx
+
             # Steering intervention
             logits_steered = perform_causal_intervention(
-                model_wrapper, sae, eval_image, layer_idx=layer, feature_idx=f_idx,
-                intervention_type="steering", scaling_factor=5.0, target_type="mlp"
+                model_wrapper,
+                sae,
+                eval_image,
+                layer_idx=layer,
+                feature_idx=f_idx,
+                intervention_type="steering",
+                scaling_factor=5.0,
+                target_type="mlp",
             )
             steered_logit = logits_steered[:, predicted_class_idx].mean().item()
-            steer_increase = (steered_logit - baseline_logit) / (abs(baseline_logit) + 1e-8) * 100
-            
+            steer_increase = (
+                (steered_logit - baseline_logit) / (abs(baseline_logit) + 1e-8) * 100
+            )
+
             feat_result = {
                 "Feature Index": f_idx,
                 "Target Layer": layer_name,
@@ -358,43 +424,56 @@ def main():
                 "Baseline Logit": f"{baseline_logit:.4f}",
                 "Ablated Logit": f"{ablated_logit:.4f}",
                 "Relative Logit Drop (%)": f"{rel_drop:.4f}",
-                "Steered Logit Increase (%)": f"{steer_increase:.4f}"
+                "Steered Logit Increase (%)": f"{steer_increase:.4f}",
             }
             discovered_features_detail.append(feat_result)
-            
+
             if layer == 10 and len(grid_features_dict) < 5:
                 grid_features_dict[f_idx] = {
                     "exemplars": exemplars,
-                    "concept": best_concept
+                    "concept": best_concept,
                 }
-                
+
         mean_logit_drop = sum(layer_drops) / (len(layer_drops) + 1e-8)
-        
-        layer_comparison_summary.append({
-            "Layer": layer_name,
-            "R^2 Score": f"{final_r2:.4f}",
-            "L_0 Norm": f"{final_l0:.2f}",
-            "Mean Logit Drop": f"{mean_logit_drop:.4f}%"
-        })
-        
+
+        layer_comparison_summary.append(
+            {
+                "Layer": layer_name,
+                "R^2 Score": f"{final_r2:.4f}",
+                "L_0 Norm": f"{final_l0:.2f}",
+                "Mean Logit Drop": f"{mean_logit_drop:.4f}%",
+            }
+        )
+
     # 5. summary table to stdout and file
     markdown_table = (
-        "\n" + "="*59 + "\n"
+        "\n"
+        + "=" * 59
+        + "\n"
         + "             MULTI-LAYER COMPARATIVE SUMMARY\n"
-        + "="*59 + "\n"
+        + "=" * 59
+        + "\n"
         + f"| {'Layer':10} | {'R^2 Score':9} | {'L_0 Norm':8} | {'Mean Logit Drop':17} |\n"
-        + "|" + "-"*12 + "|" + "-"*11 + "|" + "-"*10 + "|" + "-"*19 + "|\n"
+        + "|"
+        + "-" * 12
+        + "|"
+        + "-" * 11
+        + "|"
+        + "-" * 10
+        + "|"
+        + "-" * 19
+        + "|\n"
     )
     for row in layer_comparison_summary:
         markdown_table += f"| {row['Layer']:10} | {row['R^2 Score']:9} | {row['L_0 Norm']:8} | {row['Mean Logit Drop']:17} |\n"
-    markdown_table += "="*59 + "\n"
-    
+    markdown_table += "=" * 59 + "\n"
+
     print(markdown_table)
-    
+
     with open("layer_comparison_summary.md", mode="w", encoding="utf-8") as f:
         f.write(markdown_table)
     logger.info("Saved layer comparison table to layer_comparison_summary.md")
-    
+
     # 6. Save unified 5x5 feature grid visualization for Layer 11
     if grid_features_dict:
         save_feature_grid_visualization(
@@ -403,27 +482,41 @@ def main():
             patch_size=model_wrapper.patch_size,
             grid_size=model_wrapper.grid_size,
         )
-        
+
     # 7. Quantitative CSV Exporter
     csv_file_path = "discovered_features_summary.csv"
     with open(csv_file_path, mode="w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "Feature Index", "Target Layer", "Assigned CLIP Concept", 
-            "CLIP Confidence Score", "Baseline Logit", "Ablated Logit", 
-            "Relative Logit Drop (%)", "Steered Logit Increase (%)"
-        ])
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "Feature Index",
+                "Target Layer",
+                "Assigned CLIP Concept",
+                "CLIP Confidence Score",
+                "Baseline Logit",
+                "Ablated Logit",
+                "Relative Logit Drop (%)",
+                "Steered Logit Increase (%)",
+            ],
+        )
         writer.writeheader()
         writer.writerows(discovered_features_detail)
     logger.info(f"Saved quantitative summary to {csv_file_path}")
-    
+
     # 8. Plot Dose-Response for a representative feature (Feature with largest causal drop on Layer 11)
     logger.info("Generating Causal Dose-Response curve for representation...")
     layer11_sae = layer_saes[10]
     layer11_features = layer_top_features[10]
-    
-    representative_feat = best_layer11_feature_idx if best_layer11_feature_idx is not None else (layer11_features[0] if layer11_features else 100)
-    logger.info(f"Selected Feature {representative_feat} for Dose-Response curve (ablation drop: {best_layer11_drop:.4f}%)")
-    
+
+    representative_feat = (
+        best_layer11_feature_idx
+        if best_layer11_feature_idx is not None
+        else (layer11_features[0] if layer11_features else 100)
+    )
+    logger.info(
+        f"Selected Feature {representative_feat} for Dose-Response curve (ablation drop: {best_layer11_drop:.4f}%)"
+    )
+
     plot_dose_response(
         model_wrapper=model_wrapper,
         sae=layer11_sae,
@@ -436,6 +529,7 @@ def main():
     )
 
     logger.info("Pipeline execution completed successfully.")
+
 
 if __name__ == "__main__":
     main()
