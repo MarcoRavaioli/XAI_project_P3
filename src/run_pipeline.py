@@ -254,7 +254,9 @@ def main():
     elif args.dataset == "imagenette":
         try:
             val_dir = check_and_download_imagenette(args.dataset_path)
-            logger.info(f"Setting up ImageNette (10-class ImageNet subset) from {val_dir}...")
+            logger.info(
+                f"Setting up ImageNette (10-class ImageNet subset) from {val_dir}..."
+            )
             from torchvision.datasets import ImageFolder
 
             dataset = ImageFolder(root=val_dir, transform=imagenet_style_transform)
@@ -281,11 +283,11 @@ def main():
                 logger.info(
                     "Local ImageNet-100 not found. Downloading via HuggingFace datasets..."
                 )
-                hf_ds = load_dataset(
-                    "clane9/imagenet-100", split="validation"
-                )
+                hf_ds = load_dataset("clane9/imagenet-100", split="validation")
                 dataset = HFImageDataset(hf_ds, transform=imagenet_style_transform)
-                logger.info(f"ImageNet-100 loaded from HuggingFace ({len(dataset)} images).")
+                logger.info(
+                    f"ImageNet-100 loaded from HuggingFace ({len(dataset)} images)."
+                )
             except Exception as e:
                 logger.warning(
                     f"Could not load ImageNet-100: {e}. Falling back to CIFAR-10. "
@@ -343,27 +345,86 @@ def main():
     labeler = CLIPAutoLabeler(device=device)
     dataset_concepts = {
         "imagewoof": [
-            "fur", "eye", "nose", "ear", "tongue", "snout",
-            "paw", "tail", "collar", "spotted pattern",
-            "grass", "sky", "person", "leash",
+            "fur",
+            "eye",
+            "nose",
+            "ear",
+            "tongue",
+            "snout",
+            "paw",
+            "tail",
+            "collar",
+            "spotted pattern",
+            "grass",
+            "collie",
+            "labrador",
         ],
         "imagenette": [
-            "fish", "dog", "car", "church", "cassette player",
-            "chain saw", "golf ball", "parachute", "gas pump", "horn",
-            "sky", "grass", "water", "metal texture", "wood",
-            "wheel", "fur", "eye", "scale pattern", "red color",
+            "fish",
+            "dog",
+            "car",
+            "church",
+            "cassette player",
+            "chain saw",
+            "golf ball",
+            "parachute",
+            "gas pump",
+            "horn",
+            "sky",
+            "grass",
+            "water",
+            "metal texture",
+            "wood",
+            "wheel",
+            "fur",
+            "eye",
+            "scale pattern",
+            "red color",
         ],
         "imagenet": [
-            "animal", "dog", "bird", "fish", "insect", "vehicle",
-            "building", "food", "plant", "furniture", "person",
-            "sky", "water", "grass", "fur", "eye", "wheel",
-            "metal texture", "wood", "stripe", "scale pattern",
+            "animal",
+            "dog",
+            "bird",
+            "fish",
+            "insect",
+            "snake",
+            "building",
+            "food",
+            "plant",
+            "furniture",
+            "person",
+            "fur texture",
+            "feather texture",
+            "honeycomb pattern",
+            "striped pattern",
+            "spotted pattern",
+            "geometric pattern",
+            "yellow color",
+            "eye",
+            "face",
+            "scale pattern",
         ],
         "cifar10": [
-            "airplane", "automobile", "bird", "cat", "deer",
-            "dog", "frog", "horse", "ship", "truck",
-            "sky", "water", "grass", "road", "wheel",
-            "wing", "fur", "eye", "metal texture", "stripe",
+            "airplane",
+            "automobile",
+            "bird",
+            "cat",
+            "deer",
+            "dog",
+            "frog",
+            "horse",
+            "ship",
+            "truck",
+            "sky",
+            "water",
+            "grass",
+            "road",
+            "wheel",
+            "wing",
+            "fur",
+            "eye",
+            "metal texture",
+            "stripe",
         ],
     }
     candidate_concepts = dataset_concepts.get(
@@ -389,7 +450,11 @@ def main():
             class_name = dataset.classes[first_img_label]
         except Exception:
             pass
-    elif hasattr(dataset, "dataset") and hasattr(dataset.dataset, "features") and "label" in dataset.dataset.features:
+    elif (
+        hasattr(dataset, "dataset")
+        and hasattr(dataset.dataset, "features")
+        and "label" in dataset.dataset.features
+    ):
         try:
             class_name = dataset.dataset.features["label"].int2str(first_img_label)
         except Exception:
@@ -411,13 +476,13 @@ def main():
     for i, layer in enumerate(layers_to_compare):
         layer_name = f"Layer {layer + 1}"
         logger.info(f"\n" + "=" * 50 + f"\nPROCESSING LAYER: {layer_name}\n" + "=" * 50)
-        
+
         # Determine L1 coefficient based on position in layers_to_compare (index i)
         if i < len(args.l1_coeff):
             l1_val = args.l1_coeff[i]
         else:
             l1_val = args.l1_coeff[-1]
-            
+
         logger.info(f"Using L1 coefficient {l1_val:.2e} for {layer_name}")
 
         activation_buffer = TokenActivationBuffer(
@@ -591,13 +656,17 @@ def main():
         f.write(markdown_table)
     logger.info(f"Saved layer comparison table to {summary_path}")
 
-    # 6. Save unified 5x5 feature grid visualization for Layer 11
+    # 6. Save unified feature grid visualization for Layer 11
     if grid_features_dict:
         save_feature_grid_visualization(
-            grid_features_dict,
-            os.path.join(out_dir, "multi_feature_exemplar_grid.png"),
+            model_wrapper=model_wrapper,
+            sae=layer_saes[10],
+            top_features_dict=grid_features_dict,
+            output_path=os.path.join(out_dir, "multi_feature_exemplar_grid.png"),
+            layer_idx=10,
             patch_size=model_wrapper.patch_size,
             grid_size=model_wrapper.grid_size,
+            device=device,
         )
 
     # 7. Quantitative CSV Exporter
@@ -647,7 +716,9 @@ def main():
 
     # 9. Plot SAE training convergence curves
     if layer_histories:
-        plot_training_curves(layer_histories, save_path=os.path.join(out_dir, "sae_training_curves.png"))
+        plot_training_curves(
+            layer_histories, save_path=os.path.join(out_dir, "sae_training_curves.png")
+        )
 
     # 10. Generate spatial activation heatmap for the most causally active Layer 11 feature
     if best_layer11_feature_idx is not None:

@@ -224,44 +224,107 @@ class CLIPAutoLabeler:
         return best_concept, best_score, all_scores
 
 
+def get_feature_activation_map(
+    model_wrapper: ViTModelWrapper,
+    sae: SparseAutoencoder,
+    image: torch.Tensor,
+    layer_idx: int,
+    feature_idx: int,
+    target_type: str = "mlp",
+    device: str = "cpu",
+) -> np.ndarray:
+    """
+    Computes a 2D grid of feature activation intensities for a single image.
+    Returns a numpy array of shape (grid_size, grid_size).
+    """
+    sae.eval()
+    grid_size = model_wrapper.grid_size
+
+    submodule = model_wrapper.get_submodule(layer_idx, target_type)
+    hook = ActivationHook(submodule)
+    hook.register()
+
+    img_input = image.unsqueeze(0).to(device) if image.dim() == 3 else image.to(device)
+
+    with torch.no_grad():
+        _ = model_wrapper.model(img_input)
+        activation = hook.activation
+    hook.remove()
+
+    if activation is None:
+        logger.warning("No activation captured for heatmap.")
+        return np.zeros((grid_size, grid_size))
+
+    with torch.no_grad():
+        patch_tokens = activation[:, 1:, :]
+        f = sae.encode(patch_tokens)  # [1, 196, hidden_dim]
+        feature_acts = f[0, :, feature_idx].detach().cpu().numpy()  # [196]
+
+    return feature_acts.reshape(grid_size, grid_size)
+
+
 def save_feature_grid_visualization(
+    model_wrapper: ViTModelWrapper,
+    sae: SparseAutoencoder,
     top_features_dict: Dict[int, Dict[str, Any]],
     output_path: str,
+    layer_idx: int,
     patch_size: int = 16,
     grid_size: int = 14,
+    device: str = "cpu",
 ):
     """
-    Generates and saves a unified 5x5 grid plot representing 5 SAE features (rows)
-    and their top-5 activating images with highlighted active patches (columns).
-
-    Each row is labeled with its feature index and assigned CLIP concept.
+    Generates and saves a unified multi-feature grid plot.
+    For each feature, it renders 3 rows:
+      - Row 1: The 5 top-activating 16x16 patch crops (zoomed up).
+      - Row 2: The full source images with the active patch highlighted.
+      - Row 3: The activation heatmap overlay.
     """
     import matplotlib
 
     matplotlib.use("agg")
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
+    from matplotlib.colors import Normalize
+    from PIL import Image as PILImage
 
     # ImageNet/CIFAR-10 normalization values to unnormalize images for display
     mean = np.array([0.485, 0.456, 0.406])
     std = np.array([0.229, 0.224, 0.225])
 
-    fig, axes = plt.subplots(5, 5, figsize=(10, 10))
     feature_indices = list(top_features_dict.keys())
+    num_features = len(feature_indices)
 
-    for r in range(5):
-        if r >= len(feature_indices):
-            for c in range(5):
-                axes[r, c].axis("off")  # fill empty rows if we have fewer features
-            continue
+    fig, axes = plt.subplots(num_features * 3, 5, figsize=(15, num_features * 3 * 2.5))
 
+    for r in range(num_features):
         feat_idx = feature_indices[r]
         feat_data = top_features_dict[feat_idx]
         exemplars = feat_data.get("exemplars", [])
         concept = feat_data.get("concept", "unknown")
-        axes[r, 0].set_ylabel(
-            f"Feature {feat_idx}\n({concept})",
-            fontsize=9,
+
+        # Set row labels on the left column (column 0)
+        axes[r * 3 + 0, 0].set_ylabel(
+            f"Feature {feat_idx}\n({concept})\n\nCrops",
+            fontsize=10,
+            fontweight="bold",
+            rotation=0,
+            labelpad=50,
+            va="center",
+            ha="right",
+        )
+        axes[r * 3 + 1, 0].set_ylabel(
+            "Full Images",
+            fontsize=10,
+            fontweight="bold",
+            rotation=0,
+            labelpad=50,
+            va="center",
+            ha="right",
+        )
+        axes[r * 3 + 2, 0].set_ylabel(
+            "Heatmaps",
+            fontsize=10,
             fontweight="bold",
             rotation=0,
             labelpad=50,
@@ -270,17 +333,40 @@ def save_feature_grid_visualization(
         )
 
         for c in range(5):
-            ax = axes[r, c]
-            ax.set_xticks([])
-            ax.set_yticks([])
+            # 1. Crops Row
+            ax_crop = axes[r * 3 + 0, c]
+            ax_crop.set_xticks([])
+            ax_crop.set_yticks([])
+
+            # 2. Full Image Row
+            ax_full = axes[r * 3 + 1, c]
+            ax_full.set_xticks([])
+            ax_full.set_yticks([])
+
+            # 3. Heatmap Row
+            ax_heat = axes[r * 3 + 2, c]
+            ax_heat.set_xticks([])
+            ax_heat.set_yticks([])
 
             if c >= len(exemplars):
-                ax.axis("off")
+                ax_crop.axis("off")
+                ax_full.axis("off")
+                ax_heat.axis("off")
                 continue
 
             ex = exemplars[c]
-            # Try to use full image to display with a highlighted bounding box,
-            # otherwise fallback to crop.
+            act = ex["activation"]
+            spatial_idx = ex.get("spatial_idx", None)
+
+            # --- Row 1: Crop ---
+            crop_tensor = ex["crop"]
+            crop_np = crop_tensor.permute(1, 2, 0).cpu().numpy()
+            crop_unnorm = crop_np * std + mean
+            crop_unnorm = np.clip(crop_unnorm, 0.0, 1.0)
+            ax_crop.imshow(crop_unnorm, interpolation="nearest")
+            ax_crop.set_title(f"Act: {act:.2f}", fontsize=9)
+
+            # --- Row 2: Full Image ---
             if "full_image" in ex:
                 img_tensor = ex["full_image"]
                 has_full = True
@@ -288,37 +374,61 @@ def save_feature_grid_visualization(
                 img_tensor = ex["crop"]
                 has_full = False
 
-            act = ex["activation"]
-            spatial_idx = ex.get("spatial_idx", None)
-
-            # channel-first tensor to channel-last numpy
             img_np = img_tensor.permute(1, 2, 0).cpu().numpy()
-
-            # unnormalize
             img_unnorm = img_np * std + mean
             img_unnorm = np.clip(img_unnorm, 0.0, 1.0)
-
-            ax.imshow(img_unnorm)
+            ax_full.imshow(img_unnorm)
 
             if has_full and spatial_idx is not None:
-                row = (spatial_idx // grid_size) * patch_size
-                col = (spatial_idx % grid_size) * patch_size
+                row_coord = (spatial_idx // grid_size) * patch_size
+                col_coord = (spatial_idx % grid_size) * patch_size
                 rect = patches.Rectangle(
-                    (col, row),
+                    (col_coord, row_coord),
                     patch_size,
                     patch_size,
-                    linewidth=2.5,
+                    linewidth=1.5,
                     edgecolor="red",
                     facecolor="none",
                 )
-                ax.add_patch(rect)
+                ax_full.add_patch(rect)
 
-            ax.set_title(f"Act: {act:.2f}", fontsize=8)
+            # --- Row 3: Heatmap Overlay ---
+            if has_full:
+                heatmap = get_feature_activation_map(
+                    model_wrapper=model_wrapper,
+                    sae=sae,
+                    image=img_tensor,
+                    layer_idx=layer_idx,
+                    feature_idx=feat_idx,
+                    target_type="mlp",
+                    device=device,
+                )
+                heatmap_resized = (
+                    np.array(
+                        PILImage.fromarray(
+                            (
+                                Normalize(
+                                    vmin=heatmap.min(), vmax=heatmap.max() + 1e-8
+                                )(heatmap)
+                                * 255
+                            ).astype(np.uint8)
+                        ).resize(
+                            (img_unnorm.shape[1], img_unnorm.shape[0]),
+                            PILImage.BILINEAR,
+                        )
+                    )
+                    / 255.0
+                )
+                ax_heat.imshow(img_unnorm)
+                ax_heat.imshow(heatmap_resized, cmap="hot", alpha=0.5)
+            else:
+                ax_heat.axis("off")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close()
     logger.info(f"Multi-feature exemplar grid saved to {output_path}")
+
 
 def save_feature_activation_heatmap(
     model_wrapper: ViTModelWrapper,
@@ -339,31 +449,17 @@ def save_feature_activation_heatmap(
     matplotlib.use("agg")
     import matplotlib.pyplot as plt
     from matplotlib.colors import Normalize
+    from PIL import Image as PILImage
 
-    sae.eval()
-    grid_size = model_wrapper.grid_size
-
-    submodule = model_wrapper.get_submodule(layer_idx, target_type)
-    hook = ActivationHook(submodule)
-    hook.register()
-
-    img_input = image.unsqueeze(0).to(device) if image.dim() == 3 else image.to(device)
-
-    with torch.no_grad():
-        _ = model_wrapper.model(img_input)
-        activation = hook.activation
-    hook.remove()
-
-    if activation is None:
-        logger.warning("No activation captured for heatmap.")
-        return
-
-    with torch.no_grad():
-        patch_tokens = activation[:, 1:, :]
-        f = sae.encode(patch_tokens)  # [1, 196, hidden_dim]
-        feature_acts = f[0, :, feature_idx].detach().cpu().numpy()  # [196]
-
-    heatmap = feature_acts.reshape(grid_size, grid_size)
+    heatmap = get_feature_activation_map(
+        model_wrapper=model_wrapper,
+        sae=sae,
+        image=image,
+        layer_idx=layer_idx,
+        feature_idx=feature_idx,
+        target_type=target_type,
+        device=device,
+    )
 
     # unnormalize source image for display
     mean = np.array([0.485, 0.456, 0.406])
@@ -380,26 +476,32 @@ def save_feature_activation_heatmap(
     axes[0].axis("off")
 
     im = axes[1].imshow(heatmap, cmap="hot", interpolation="nearest")
-    axes[1].set_title(f"Feature {feature_idx} Activation Map", fontsize=10, fontweight="bold")
+    axes[1].set_title(
+        f"Feature {feature_idx} Activation Map", fontsize=10, fontweight="bold"
+    )
     axes[1].axis("off")
     plt.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
 
     axes[2].imshow(img_display)
-    import matplotlib.image as mimg
-    from PIL import Image as PILImage
-
-    heatmap_resized = np.array(
-        PILImage.fromarray(
-            (Normalize(vmin=heatmap.min(), vmax=heatmap.max() + 1e-8)(heatmap) * 255).astype(np.uint8)
-        ).resize((img_display.shape[1], img_display.shape[0]), PILImage.BILINEAR)
-    ) / 255.0
+    heatmap_resized = (
+        np.array(
+            PILImage.fromarray(
+                (
+                    Normalize(vmin=heatmap.min(), vmax=heatmap.max() + 1e-8)(heatmap)
+                    * 255
+                ).astype(np.uint8)
+            ).resize((img_display.shape[1], img_display.shape[0]), PILImage.BILINEAR)
+        )
+        / 255.0
+    )
     axes[2].imshow(heatmap_resized, cmap="hot", alpha=0.5)
     axes[2].set_title("Overlay", fontsize=10, fontweight="bold")
     axes[2].axis("off")
 
     plt.suptitle(
         f"SAE Feature {feature_idx} — Spatial Activation Heatmap (Layer {layer_idx + 1})",
-        fontsize=12, fontweight="bold",
+        fontsize=12,
+        fontweight="bold",
     )
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
