@@ -10,3 +10,24 @@ wheels/
 *.egg-info
 
 .venv
+
+# Latex temp files
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.gz
+*.fls
+*.fdb_latexmk
+*.bbl
+*.blg
+*.spl
+*.synctex
+*.synctex(busy)
+*.synctex.gz(busy)
+*.nav
+*.snm
+
+out/
+data/
