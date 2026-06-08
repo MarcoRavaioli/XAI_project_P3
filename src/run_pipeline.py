@@ -666,6 +666,23 @@ def main():
                     grid_path, os.path.join(out_dir, "multi_feature_exemplar_grid.png")
                 )
 
+            # Save individual feature grid visualizations for each feature
+            for feat_idx, feat_data in layer_grid_features_dict.items():
+                single_feat_path = os.path.join(
+                    out_dir, f"feature_grid_layer{layer + 1}_feat{feat_idx}.png"
+                )
+                save_feature_grid_visualization(
+                    model_wrapper=model_wrapper,
+                    sae=sae,
+                    top_features_dict={feat_idx: feat_data},
+                    output_path=single_feat_path,
+                    layer_idx=layer,
+                    patch_size=model_wrapper.patch_size,
+                    grid_size=model_wrapper.grid_size,
+                    device=device,
+                    context_patches=args.context_patches,
+                )
+
     # 5. summary table to stdout and file
     markdown_table = (
         "\n"
