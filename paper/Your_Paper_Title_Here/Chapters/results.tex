@@ -1,21 +1,52 @@
-% TODO: fill in once experiments are done. Three subsections below.
+% TODO: fill in once experiments are done. Four subsections below.
 
 \subsection{Interpretability of Discovered Features}
 
-% Gallery of top-K patches per feature (aim for ~6-8 features across layers).
-% Per feature: CLIP label, mono/polysemantic flag, brief visual description.
+% Gallery of top-K (K=5) contextual crops per feature (aim for ~6-8 features
+% across layers 6 and 11). Per feature: CLIP aggregate label, mono/polysemantic
+% flag (per the operational definition given in Methodology), brief visual
+% description.
 %
 % \begin{figure}[H]
 %     \centering
 %     \includegraphics[width=\textwidth]{Figures/feature_gallery.png}
-%     \caption{Top-16 activating patches for representative SAE features at layer 8.}
+%     \caption{Top-$K$ activating contextual crops for representative SAE features at layer 6 and layer 11.}
 %     \label{fig:feature_gallery}
 % \end{figure}
 
 \subsection{Feature Variation Across Layers}
 
-% How features change from layer 4 to layer 12.
-% Expected: low-level texture/colour early, object-level semantics deep.
+% How features change between layer 6 (mid-network) and layer 11 (late-network).
+% Expected: low-level texture/colour at layer 6, object-level semantics at
+% layer 11 -- to be confirmed (or refined) by the labels actually obtained,
+% and reconciled with the dataset/vocabulary declared in Methodology.
+
+\subsection{Human Evaluation}
+
+% Closes the "automated labelling via CLIP ... AND through human evaluation"
+% requirement of the P3 brief (see also Methodology / Conclusion, where the
+% operational definition of "monosemantic" now explicitly references this step).
+%
+% Procedure: for a subset of N features (e.g. the K=10 CLIP-labelled features
+% per layer), one team member inspects the top-K contextual crops "blind"
+% (without seeing the CLIP label), proposes an independent concept, and the
+% two labels are then compared. Report agreement / disagreement and discuss
+% any systematic divergences (e.g. CLIP latching onto background context while
+% the human focuses on the foreground object, or vice versa).
+%
+% \begin{table}[H]
+%     \centering
+%     \caption{Agreement between the CLIP-assigned label and an independent human judgement, per layer.}
+%     \label{tab:human_eval}
+%     \begin{tabular}{lccc}
+%         \toprule
+%         Layer & Features inspected & Agree & Disagree / ambiguous \\
+%         \midrule
+%         6  & -- & -- & -- \\
+%         11 & -- & -- & -- \\
+%         \bottomrule
+%     \end{tabular}
+% \end{table}
 
 \subsection{Quantitative Metrics}
 
@@ -27,9 +58,8 @@
 %         \toprule
 %         Layer & $\bar{L}_0$ & MSE & Dict.\ util. & Monosemantic (\%) \\
 %         \midrule
-%         4  & -- & -- & -- & -- \\
-%         8  & -- & -- & -- & -- \\
-%         12 & -- & -- & -- & -- \\
+%         6  & -- & -- & -- & -- \\
+%         11 & -- & -- & -- & -- \\
 %         \bottomrule
 %     \end{tabular}
 % \end{table}
