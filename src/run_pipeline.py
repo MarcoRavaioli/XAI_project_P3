@@ -104,6 +104,12 @@ def parse_args():
         default=0,
         help="Index of the image in the dataset to use for surgical evaluation",
     )
+    parser.add_argument(
+        "--context_patches",
+        type=int,
+        default=2,
+        help="Number of patches of padding on each side of the central patch for context crops (e.g. 2 means a 5x5 crop)",
+    )
     return parser.parse_args()
 
 
@@ -557,6 +563,7 @@ def main():
                 candidate_concepts,
                 patch_size=model_wrapper.patch_size,
                 grid_size=model_wrapper.grid_size,
+                context_patches=args.context_patches,
             )
 
             # Baseline logit
@@ -650,6 +657,7 @@ def main():
                 patch_size=model_wrapper.patch_size,
                 grid_size=model_wrapper.grid_size,
                 device=device,
+                context_patches=args.context_patches,
             )
             if layer == 10:
                 import shutil
