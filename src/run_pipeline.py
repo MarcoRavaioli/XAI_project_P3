@@ -392,7 +392,7 @@ def main():
             "insect",
             "snake",
             "building",
-            "food",
+            "wasp",
             "plant",
             "furniture",
             "person",
@@ -404,7 +404,6 @@ def main():
             "geometric pattern",
             "pineapple",
             "eye",
-            "face",
             "scale pattern",
         ],
         "cifar10": [
@@ -554,7 +553,10 @@ def main():
 
             # Auto-label with CLIP
             best_concept, best_score, all_scores = labeler.label_feature(
-                exemplars, candidate_concepts
+                exemplars,
+                candidate_concepts,
+                patch_size=model_wrapper.patch_size,
+                grid_size=model_wrapper.grid_size,
             )
 
             # Baseline logit

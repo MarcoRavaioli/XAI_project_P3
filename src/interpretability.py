@@ -38,6 +38,35 @@ def extract_patch_crop(
     return crop
 
 
+def extract_contextual_crop(
+    image: torch.Tensor,
+    spatial_idx: int,
+    patch_size: int,
+    grid_size: int,
+    context_patches: int = 2,
+) -> torch.Tensor:
+    """
+    Extract a larger contextual crop around a spatial patch token index.
+    Input:
+        image [C, H, W]: Input image tensor.
+        spatial_idx: Flat spatial index of the central patch.
+        patch_size: Width/height of each patch.
+        grid_size: Number of patches along one dimension of the grid.
+        context_patches: Number of patches of padding on each side of the central patch.
+    Output:
+        crop [C, crop_h, crop_w]: Cropped context tensor.
+    """
+    row = spatial_idx // grid_size
+    col = spatial_idx % grid_size
+
+    row_start = max(0, row - context_patches) * patch_size
+    row_end = min(grid_size, row + context_patches + 1) * patch_size
+    col_start = max(0, col - context_patches) * patch_size
+    col_end = min(grid_size, col + context_patches + 1) * patch_size
+
+    return image[:, row_start:row_end, col_start:col_end]
+
+
 def get_top_activating_patches(
     model_wrapper: ViTModelWrapper,
     sae: SparseAutoencoder,
@@ -138,7 +167,12 @@ class CLIPAutoLabeler:
         self.model.eval()
 
     def label_feature(
-        self, exemplars: List[Dict[str, Any]], candidate_concepts: List[str]
+        self,
+        exemplars: List[Dict[str, Any]],
+        candidate_concepts: List[str],
+        patch_size: int = 16,
+        grid_size: int = 14,
+        context_patches: int = 2,
     ) -> Tuple[str, float, Dict[str, float]]:
         """
         Assigns a semantic concept from candidates to the SAE feature using exemplar similarity.
@@ -158,13 +192,21 @@ class CLIPAutoLabeler:
         mean = np.array([0.485, 0.456, 0.406])
         std = np.array([0.229, 0.224, 0.225])
 
-        # Use full source images for CLIP (tiny crops are too small for meaningful similarity)
+        # Use contextual crops centered around the active patch
         images_for_clip = []
         for ex in exemplars:
-            if "full_image" in ex:
-                img_np = ex["full_image"].permute(1, 2, 0).cpu().numpy()
+            if "full_image" in ex and "spatial_idx" in ex:
+                crop_tensor = extract_contextual_crop(
+                    image=ex["full_image"],
+                    spatial_idx=ex["spatial_idx"],
+                    patch_size=patch_size,
+                    grid_size=grid_size,
+                    context_patches=context_patches,
+                )
             else:
-                img_np = ex["crop"].permute(1, 2, 0).cpu().numpy()
+                crop_tensor = ex["crop"]
+
+            img_np = crop_tensor.permute(1, 2, 0).cpu().numpy()
             img_unnorm = img_np * std + mean
             img_unnorm = np.clip(img_unnorm, 0.0, 1.0)
             img_uint8 = (img_unnorm * 255.0).clip(0, 255).astype(np.uint8)
