@@ -396,12 +396,10 @@ def main():
             "bird",
             "fish",
             "insect",
-            "snake",
             "building",
             "wasp",
             "plant",
             "furniture",
-            "person",
             "fur texture",
             "feather texture",
             "honeycomb pattern",
@@ -544,6 +542,7 @@ def main():
         layer_top_features[layer] = top_features
 
         layer_drops = []
+        grid_candidates = []
 
         for idx, f_idx in enumerate(top_features):
             exemplars = get_top_activating_patches(
@@ -626,11 +625,22 @@ def main():
             }
             discovered_features_detail.append(feat_result)
 
-            if len(layer_grid_features_dict) < 5:
-                layer_grid_features_dict[f_idx] = {
+            grid_candidates.append(
+                {
+                    "feat_idx": f_idx,
                     "exemplars": exemplars,
                     "concept": best_concept,
+                    "clip_score": best_score,
                 }
+            )
+
+        # Select the 5 candidates with the highest CLIP confidence scores for grid visualization
+        grid_candidates.sort(key=lambda x: x["clip_score"], reverse=True)
+        for cand in grid_candidates[:5]:
+            layer_grid_features_dict[cand["feat_idx"]] = {
+                "exemplars": cand["exemplars"],
+                "concept": cand["concept"],
+            }
 
         mean_logit_drop = sum(layer_drops) / (len(layer_drops) + 1e-8)
 
