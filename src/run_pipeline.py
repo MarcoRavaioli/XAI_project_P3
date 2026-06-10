@@ -104,6 +104,12 @@ def parse_args():
         default=0,
         help="Index of the image in the dataset to use for surgical evaluation",
     )
+    parser.add_argument(
+        "--context_patches",
+        type=int,
+        default=2,
+        help="Number of patches of padding on each side of the central patch for context crops (e.g. 2 means a 5x5 crop)",
+    )
     return parser.parse_args()
 
 
@@ -390,12 +396,10 @@ def main():
             "bird",
             "fish",
             "insect",
-            "snake",
             "building",
             "wasp",
             "plant",
             "furniture",
-            "person",
             "fur texture",
             "feather texture",
             "honeycomb pattern",
@@ -538,6 +542,7 @@ def main():
         layer_top_features[layer] = top_features
 
         layer_drops = []
+        grid_candidates = []
 
         for idx, f_idx in enumerate(top_features):
             exemplars = get_top_activating_patches(
@@ -557,6 +562,7 @@ def main():
                 candidate_concepts,
                 patch_size=model_wrapper.patch_size,
                 grid_size=model_wrapper.grid_size,
+                context_patches=args.context_patches,
             )
 
             # Baseline logit
@@ -619,11 +625,22 @@ def main():
             }
             discovered_features_detail.append(feat_result)
 
-            if len(layer_grid_features_dict) < 5:
-                layer_grid_features_dict[f_idx] = {
+            grid_candidates.append(
+                {
+                    "feat_idx": f_idx,
                     "exemplars": exemplars,
                     "concept": best_concept,
+                    "clip_score": best_score,
                 }
+            )
+
+        # Select the 5 candidates with the highest CLIP confidence scores for grid visualization
+        grid_candidates.sort(key=lambda x: x["clip_score"], reverse=True)
+        for cand in grid_candidates[:5]:
+            layer_grid_features_dict[cand["feat_idx"]] = {
+                "exemplars": cand["exemplars"],
+                "concept": cand["concept"],
+            }
 
         mean_logit_drop = sum(layer_drops) / (len(layer_drops) + 1e-8)
 
@@ -650,12 +667,30 @@ def main():
                 patch_size=model_wrapper.patch_size,
                 grid_size=model_wrapper.grid_size,
                 device=device,
+                context_patches=args.context_patches,
             )
             if layer == 10:
                 import shutil
 
                 shutil.copy(
                     grid_path, os.path.join(out_dir, "multi_feature_exemplar_grid.png")
+                )
+
+            # Save individual feature grid visualizations for each feature
+            for feat_idx, feat_data in layer_grid_features_dict.items():
+                single_feat_path = os.path.join(
+                    out_dir, f"feature_grid_layer{layer + 1}_feat{feat_idx}.png"
+                )
+                save_feature_grid_visualization(
+                    model_wrapper=model_wrapper,
+                    sae=sae,
+                    top_features_dict={feat_idx: feat_data},
+                    output_path=single_feat_path,
+                    layer_idx=layer,
+                    patch_size=model_wrapper.patch_size,
+                    grid_size=model_wrapper.grid_size,
+                    device=device,
+                    context_patches=args.context_patches,
                 )
 
     # 5. summary table to stdout and file

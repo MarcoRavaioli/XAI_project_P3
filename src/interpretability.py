@@ -119,25 +119,31 @@ def get_top_activating_patches(
             f = sae.encode(patch_tokens)  # [batch_size, num_patches, hidden_dim]
             feature_activation = f[:, :, feature_idx]  # [batch_size, num_patches]
 
-            # Identify high activations within the batch
+            # Identify high activations within the batch (taking the maximum activation per image)
             for b in range(images.shape[0]):
                 img_tensor = batch[0][b]  # prevent memory leak
+                max_act_val = -1.0
+                max_p = -1
                 for p in range(feature_activation.shape[1]):
                     act_val = feature_activation[b, p].item()
-                    if act_val > 0.0:
-                        crop = extract_patch_crop(img_tensor, p, patch_size, grid_size)
-                        exemplar = {
-                            "activation": act_val,
-                            "crop": crop,
-                            "full_image": img_tensor,
-                            "spatial_idx": p,
-                            "batch_idx": batch_idx,
-                            "img_idx_in_batch": b,
-                        }
+                    if act_val > max_act_val:
+                        max_act_val = act_val
+                        max_p = p
 
-                        top_exemplars.append(exemplar)
-                        top_exemplars.sort(key=lambda x: x["activation"], reverse=True)
-                        top_exemplars = top_exemplars[:k]
+                if max_act_val > 0.0:
+                    crop = extract_patch_crop(img_tensor, max_p, patch_size, grid_size)
+                    exemplar = {
+                        "activation": max_act_val,
+                        "crop": crop,
+                        "full_image": img_tensor,
+                        "spatial_idx": max_p,
+                        "batch_idx": batch_idx,
+                        "img_idx_in_batch": b,
+                    }
+
+                    top_exemplars.append(exemplar)
+                    top_exemplars.sort(key=lambda x: x["activation"], reverse=True)
+                    top_exemplars = top_exemplars[:k]
 
     hook.remove()
     logger.info(
@@ -327,6 +333,7 @@ def save_feature_grid_visualization(
     patch_size: int = 16,
     grid_size: int = 14,
     device: str = "cpu",
+    context_patches: int = 2,
 ):
     """
     Generates and saves a unified multi-feature grid plot.
@@ -387,7 +394,7 @@ def save_feature_grid_visualization(
 
         # Set row labels on the left column (column 0)
         axes[r * 3 + 0, 0].set_ylabel(
-            f"Feature {feat_idx}\n({concept})\n\nCrops",
+            f"Feature {feat_idx}\n({concept})\n\nContext Crops",
             fontsize=10,
             fontweight="bold",
             rotation=0,
@@ -440,12 +447,48 @@ def save_feature_grid_visualization(
             act = ex["activation"]
             spatial_idx = ex.get("spatial_idx", None)
 
-            # --- Row 1: Crop ---
-            crop_tensor = ex["crop"]
-            crop_np = crop_tensor.permute(1, 2, 0).cpu().numpy()
-            crop_unnorm = crop_np * std + mean
-            crop_unnorm = np.clip(crop_unnorm, 0.0, 1.0)
-            ax_crop.imshow(crop_unnorm, interpolation="nearest")
+            # --- Row 1: Context Crop ---
+            if "full_image" in ex and spatial_idx is not None:
+                crop_tensor = extract_contextual_crop(
+                    image=ex["full_image"],
+                    spatial_idx=spatial_idx,
+                    patch_size=patch_size,
+                    grid_size=grid_size,
+                    context_patches=context_patches,
+                )
+                
+                # Compute offsets of the central patch within this crop
+                row_coord = spatial_idx // grid_size
+                col_coord = spatial_idx % grid_size
+                row_start_patch = max(0, row_coord - context_patches)
+                col_start_patch = max(0, col_coord - context_patches)
+                
+                center_row_offset = (row_coord - row_start_patch) * patch_size
+                center_col_offset = (col_coord - col_start_patch) * patch_size
+                
+                crop_np = crop_tensor.permute(1, 2, 0).cpu().numpy()
+                crop_unnorm = crop_np * std + mean
+                crop_unnorm = np.clip(crop_unnorm, 0.0, 1.0)
+                
+                ax_crop.imshow(crop_unnorm, interpolation="nearest")
+                
+                # Highlight the exact central patch within the context crop
+                rect = patches.Rectangle(
+                    (center_col_offset, center_row_offset),
+                    patch_size,
+                    patch_size,
+                    linewidth=1.5,
+                    edgecolor="red",
+                    facecolor="none",
+                )
+                ax_crop.add_patch(rect)
+            else:
+                crop_tensor = ex["crop"]
+                crop_np = crop_tensor.permute(1, 2, 0).cpu().numpy()
+                crop_unnorm = crop_np * std + mean
+                crop_unnorm = np.clip(crop_unnorm, 0.0, 1.0)
+                ax_crop.imshow(crop_unnorm, interpolation="nearest")
+
             ax_crop.set_title(f"Act: {act:.2f}", fontsize=9)
 
             # --- Row 2: Full Image ---
