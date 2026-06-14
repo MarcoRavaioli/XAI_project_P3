@@ -4,10 +4,12 @@ In the domain of computer vision, Convolutional Neural Networks (CNNs) have hist
 
 Understanding these internal representations requires analyzing individual neurons. However, a major roadblock in mechanistic interpretability is \textit{polysemanticity}---the phenomenon where individual neurons activate in multiple, semantically distinct contexts. Recent frameworks \cite{Elhage2021} hypothesize that this arises from \textit{superposition}, where networks represent more features than they have dimensions by packing them into an overcomplete set of directions in the activation space. Recently, Sparse Autoencoders (SAEs) have emerged as a powerful tool to untangle this superposition, learning sets of sparsely activating features that are highly interpretable and monosemantic \cite{Cunningham2024, Bricken2023}.
 
-Despite these theoretical breakthroughs, the application of mechanistic interpretability remains heavily biased towards Large Language Models (LLMs). This disparity leaves significant research gaps in the visual domain:
+Despite these theoretical breakthroughs, in literature the application of mechanistic interpretability remains heavily biased towards Large Language Models (LLMs). This disparity leaves significant research gaps in the visual domain:
 \begin{itemize}
     \item \textbf{The Spatial Challenge:} Unlike language models that process sequential word tokens, the spatial structure of ViTs (processing 2D patch tokens) and their bidirectional attention mechanisms create unique, under-explored challenges in tracking the causal flow of information.
     \item \textbf{Cross-Modal Evaluation:} While SAEs have successfully decomposed MLP activations into interpretable concepts in LLMs, applying this to ViTs requires mapping visual latent spaces to human-understandable concepts, necessitating novel cross-modal evaluation strategies.
 \end{itemize}
 
 In this project, we address these gaps by applying mechanistic interpretability techniques to a pre-trained Vision Transformer. By leveraging Sparse Autoencoders, we aim to decompose its internal representations to understand the computational structures that drive its visual predictions.
+
+Section~2 reviews prior work on mechanistic interpretability and concept-based visual analysis; the two threads are kept separate to show how they converge, in Section~3, on the specific gaps that motivate this study. Section~4 then describes the pipeline in detail, from activation extraction to causal verification. Experimental results and their analysis are presented in Section~5, and Section~6 concludes with a discussion of limitations and future directions.

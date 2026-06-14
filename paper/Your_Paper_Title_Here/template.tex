@@ -1,88 +1,68 @@
-% ------------------------------------------------
-% LaTeX Template for ML/AI Research Paper
-% ------------------------------------------------
+\documentclass[sigconf, nonacm]{acmart}
 
-\documentclass[11pt]{article}
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
 
-% ------------------------------------------------
-% Packages
-% ------------------------------------------------
-\usepackage{amsmath, amssymb}
-\usepackage{graphicx}
-\usepackage{hyperref}
-\usepackage{natbib}          % For bibliography
-\usepackage{geometry}        % For adjusting margins
-\usepackage{times}           % For Times New Roman font
-\usepackage{float}           % For controlling float positions
-\usepackage{booktabs}        % For professional-looking tables
-\usepackage{caption}
-\usepackage{subcaption}
-\usepackage{color}
+\acmConference[Explainable and Trustworthy AI -- Project]{}{}{}
 
-% ------------------------------------------------
-% Page Setup
-% ------------------------------------------------
-\geometry{margin=1in}
+\usepackage{booktabs}
+\graphicspath{{Figures/}}
 
-% ------------------------------------------------
-% Title and Author Information
-% ------------------------------------------------
-\title{Mechanistic Interpretability of Vision Transformers:\\Sparse Autoencoder Feature Decomposition for Visual Concept Discovery}
-\author{
-  % Author names and affiliations
-  \normalsize Politecnico di Torino \\
-  \normalsize Explainable and Trustworthy AI -- 2025/2026
-}
-\date{\today}
-
-% ------------------------------------------------
-% Document Begins
-% ------------------------------------------------
 \begin{document}
 
-\maketitle
+\title{Mechanistic Interpretability of Vision Transformers:\\
+Sparse Autoencoder Feature Decomposition for Visual Concept Discovery}
 
-% ------------------------------------------------
-% Abstract
-% ------------------------------------------------
+\author{Vito Ferri}
+\affiliation{%
+  \institution{Politecnico di Torino}
+  \city{Turin}
+  \country{Italy}
+}
+
+\author{Fabio Mastromauro}
+\affiliation{%
+  \institution{Politecnico di Torino}
+  \city{Turin}
+  \country{Italy}
+}
+
+\author{Marco Ravaioli}
+\affiliation{%
+  \institution{Politecnico di Torino}
+  \city{Turin}
+  \country{Italy}
+}
+
 \begin{abstract}
 \input{Chapters/abstract}
 \end{abstract}
 
-\noindent\textbf{Keywords:} Mechanistic Interpretability, Vision Transformers, Sparse Autoencoders, Polysemanticity, Feature Decomposition, Explainable AI
+\keywords{Mechanistic Interpretability, Vision Transformers, Sparse Autoencoders,
+  Polysemanticity, Feature Decomposition, Explainable AI}
 
-% ------------------------------------------------
-% Main Content
-% ------------------------------------------------
+\maketitle
 
-% 1. Introduction
 \section{Introduction}
 \input{Chapters/introduction}
 
-% 2. Related Work – Literature Review
 \section{Related Work}
 \input{Chapters/related_work}
 
-% 3. Research Gap Discussion
-\section{Research Gap Discussion}
+\section{Research Gaps}
 \input{Chapters/research_gap}
 
-% 4. Methodology and Implementation
-\section{Methodology and Implementation}
+\section{Methodology}
 \input{Chapters/methodology}
 
-% 5. Results and Analysis
-\section{Results and Analysis}
+\section{Experiments and Analysis}
 \input{Chapters/results}
 
-% 6. Conclusion
-\section{Conclusion}
+\section{Conclusions}
 \input{Chapters/conclusion}
 
-% ------------------------------------------------
-% References
-% ------------------------------------------------
-\bibliographystyle{plainnat}
+\bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
 
 \end{document}
