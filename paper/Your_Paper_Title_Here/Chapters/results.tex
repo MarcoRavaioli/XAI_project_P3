@@ -1,153 +1,73 @@
-We evaluate the pipeline along four dimensions: SAE training quality, interpretability of the discovered features, depth-wise variation across the two monitored layers, and a qualitative human assessment of the CLIP-assigned labels.
-Figure~\ref{fig:training_curves} shows the training curves for both SAEs.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{Figures/sae_training_curves.png}
-  \caption{SAE training curves (loss, R\textsuperscript{2}, and L\textsubscript{0} sparsity) for Layer~6 and Layer~11.
-           Both models converge within the training budget.}
-  \label{fig:training_curves}
-\end{figure}
-
-\subsection{Quantitative Metrics}
-
-Table~\ref{tab:layer_metrics} reports the final-epoch SAE metrics and the mean causal footprint of the ten most active features per layer.
+Table~\ref{tab:layer_metrics} reports SAE quality and mean causal impact per layer.
 
 \begin{table}[t]
   \centering
-  \caption{Final-epoch SAE metrics and mean causal impact per layer.
-           L\textsubscript{0} is the average number of active features per patch token.
-           Mean logit drop is averaged over the ten most active features at that layer.}
+  \small
+  \caption{SAE metrics and mean causal impact. $\bar{L}_0$: avg.\ active features per patch token.}
   \label{tab:layer_metrics}
   \begin{tabular}{lccc}
     \toprule
-    Layer & R\textsuperscript{2} & $\bar{L}_0$ & Mean logit drop \\
+    Layer & R\textsuperscript{2} & $\bar{L}_0$ & Mean RLD \\
     \midrule
-    6  (mid-network)  & 0.9957 & 201.72 & 0.0319\% \\
-    11 (late-network) & 0.9477 & 107.90 & 1.4030\% \\
+    6  (mid)  & 0.9957 & 201.72 & 0.03\% \\
+    11 (late) & 0.9477 & 107.90 & 1.40\% \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-Layer~6 achieves near-perfect reconstruction (R\textsuperscript{2} = 0.9957), reflecting highly regular, structured MLP activations at mid-network depth.
-Its higher L\textsubscript{0} (201.72 active features per token) indicates that mid-network representations are distributed across many sparse directions simultaneously — though 201 out of 6,144 dictionary entries corresponds to only 3.3\% activation density, which confirms that the learned code is genuinely sparse despite the high absolute count.
-The mean logit drop of 0.0319\% confirms that individual Layer~6 features have negligible direct influence on the final classification logit.
+Layer~6 achieves near-perfect reconstruction (3.3\% activation density); its mean logit drop of 0.03\% confirms that mid-network features are individually causally negligible. Layer~11 has sparser activations (1.8\% density) and a mean logit drop 44$\times$ higher, concentrated on a single feature. Table~\ref{tab:feature_results} shows the top-5 features per layer by CLIP confidence.
 
-Layer~11 reaches a still-strong R\textsuperscript{2} = 0.9477 with notably sparser activations (L\textsubscript{0} = 107.90, or roughly 1.8\% of the dictionary), suggesting that late-network representations are encoded in fewer, more specialised directions.
-Its mean logit drop of 1.4030\% --- roughly 44$\times$ larger than at Layer~6 --- demonstrates that late-network features are individually causally relevant to the model's output.
-
-\subsection{Interpretability of Discovered Features}
-
-For each monitored layer we select the $K{=}10$ most active features, identify the $K{=}5$ contextual crops that most strongly activate each feature, and assign a CLIP label.
-Figures~\ref{fig:grid_layer6} and~\ref{fig:grid_layer11} display the five highest-confidence features per layer; Table~\ref{tab:feature_results} summarises all ten features per layer.
-
-\begin{figure*}[t]
+\begin{table}[t]
   \centering
-  \includegraphics[width=\textwidth]{Figures/multi_feature_exemplar_grid_layer6.jpg}
-  \caption{Top-5 features (by CLIP confidence) discovered at Layer~6 (mid-network).
-           Each row shows one feature: contextual crops (top), full images with highlighted patch (middle),
-           and activation heatmaps (bottom).
-           Dominant concepts are low-level texture and geometric patterns
-           (\textit{spotted pattern}, \textit{honeycomb pattern}, \textit{scale pattern}).}
-  \label{fig:grid_layer6}
-\end{figure*}
-
-\begin{figure*}[t]
-  \centering
-  \includegraphics[width=\textwidth]{Figures/multi_feature_exemplar_grid_layer11.jpg}
-  \caption{Top-5 features (by CLIP confidence) discovered at Layer~11 (late-network).
-           Feature~5065 (\textit{honeycomb pattern}, highlighted) exhibits the highest CLIP confidence
-           and a 13.49\% relative logit drop under ablation, making it the dominant causal feature
-           in the evaluated run.}
-  \label{fig:grid_layer11}
-\end{figure*}
-
-\begin{table*}[t]
-  \centering
-  \caption{Full results for the ten most active features per layer.
-           CLIP score is the mean cosine similarity between the top-$K$ crops and the
-           \textit{``a photo of \{concept\}''} prompt.
-           Relative logit drop (RLD) and steered logit increase measure causal impact
-           under ablation (scaling factor~0) and amplification (scaling factor~5), respectively,
-           evaluated on a held-out validation image.}
+  \small
+  \caption{Top-5 features per layer. CLIP score: mean cosine similarity to top-$K$ crops. RLD: relative logit drop under full ablation. Steer: logit change under 5$\times$ amplification.}
   \label{tab:feature_results}
-  \begin{tabular}{clcccc}
+  \begin{tabular}{clccc}
     \toprule
-    Layer & Feature & CLIP concept & CLIP score & RLD (\%) & Steer (\%) \\
+    Layer & Feature / concept & Score & RLD & Steer \\
     \midrule
-    6 & 4770 & spotted pattern   & 0.2669 & $+$0.04 & $+$0.16 \\
-    6 & 4271 & honeycomb pattern & 0.2651 & $-$0.04 & $-$0.03 \\
-    6 & 4506 & scale pattern     & 0.2536 & $+$0.69 & $+$1.78 \\
-    6 & 2719 & spotted pattern   & 0.2511 & $+$0.56 & $+$0.80 \\
-    6 & 2045 & pineapple         & 0.2487 & $+$0.03 & $+$0.11 \\
-    6 & 4608 & fur texture       & 0.2472 & $+$0.29 & $-$0.01 \\
-    6 & 5536 & spotted pattern   & 0.2481 & $-$0.10 & $-$1.20 \\
-    6 & 2041 & furniture         & 0.2476 & $+$0.06 & $+$0.17 \\
-    6 & 1632 & spotted pattern   & 0.2454 & $-$1.21 & $-$4.64 \\
-    6 & 4343 & scale pattern     & 0.2344 & $-$0.00 & $-$0.00 \\
+    6 & 4770~~spotted pattern   & 0.267 & $+$0.04\% & $+$0.16\% \\
+    6 & 4271~~honeycomb pattern & 0.265 & $-$0.04\% & $-$0.03\% \\
+    6 & 4506~~scale pattern     & 0.254 & $+$0.69\% & $+$1.78\% \\
+    6 & 2719~~spotted pattern   & 0.251 & $+$0.56\% & $+$0.80\% \\
+    6 & 2045~~pineapple         & 0.249 & $+$0.03\% & $+$0.11\% \\
     \midrule
-    11 & \textbf{5065} & \textbf{honeycomb pattern} & \textbf{0.2970} & $\mathbf{+13.49}$ & $\mathbf{+5.68}$ \\
-    11 & 3932 & fur texture       & 0.2794 & $+$0.00 & $+$0.00 \\
-    11 & 965  & plant             & 0.2683 & $+$0.00 & $+$0.00 \\
-    11 & 540  & striped pattern   & 0.2578 & $+$0.00 & $+$0.02 \\
-    11 & 1767 & animal            & 0.2571 & $+$0.02 & $+$0.03 \\
-    11 & 5517 & pineapple         & 0.2477 & $+$0.36 & $+$0.50 \\
-    11 & 4488 & plant             & 0.2505 & $+$0.00 & $+$0.00 \\
-    11 & 2838 & animal            & 0.2339 & $+$0.05 & $+$0.15 \\
-    11 & 3591 & plant             & 0.2395 & $+$0.11 & $+$0.10 \\
-    11 & 5771 & bird              & 0.2508 & $-$0.00 & $-$0.00 \\
+    11 & \textbf{5065~~honeycomb pattern} & \textbf{0.297} & $\mathbf{+13.49\%}$ & $\mathbf{+5.68\%}$ \\
+    11 & 3932~~fur texture       & 0.279 & $+$0.00\% & $+$0.00\% \\
+    11 & 965\phantom{0}~~plant   & 0.268 & $+$0.00\% & $+$0.00\% \\
+    11 & 540\phantom{0}~~striped pattern & 0.258 & $+$0.00\% & $+$0.02\% \\
+    11 & 1767~~animal            & 0.257 & $+$0.02\% & $+$0.03\% \\
     \bottomrule
   \end{tabular}
-\end{table*}
+\end{table}
 
-CLIP confidence scores range from 0.23 to 0.30 across all features.
-This range is expected: CLIP is trained on full images, whereas here it evaluates $16{\times}16$-pixel patch crops; the absolute similarity values are accordingly lower, but the relative ranking across candidate concepts remains discriminative~\cite{Radford2021}.
-What matters is not the absolute score in isolation, but two complementary signals: the margin by which the winning concept outscores the remaining 17 candidates for a given feature, and the consistency of that label across all five top-activating crops. A feature whose five crops independently converge on the same concept provides more reliable evidence of monosemanticity than one where the score is high but the crops are visually heterogeneous — a distinction that informed the human evaluation reported below.
+\subsection{Feature Variation Across Depths}
 
-\subsection{Feature Variation Across Layers}
-
-The discovered concepts differ systematically between the two depths.
-At Layer~6, the ten most active features are dominated by low-level texture and geometric patterns: \textit{spotted pattern} (four features), \textit{scale pattern} (two), \textit{honeycomb pattern}, \textit{fur texture}, \textit{furniture}, and \textit{pineapple}.
-This is consistent with the role of mid-network MLP layers as detectors of local visual structure, before information is integrated into higher-level representations~\cite{Raghu2021}.
-The corresponding causal impact is negligible: all Layer~6 relative logit drops are below 1.3\% in magnitude, and the mean across the ten features is only 0.03\%.
-
-At Layer~11, the feature vocabulary shifts towards more semantically abstract concepts: \textit{animal} (two features), \textit{plant} (three), \textit{bird}, alongside texture descriptors.
-More strikingly, causal impact is heavily concentrated on a single feature: Feature~5065 (\textit{honeycomb pattern}) accounts for a 13.49\% relative logit drop under ablation and a 5.68\% logit increase under amplification, with all remaining nine features showing drops below 0.4\%.
-This concentration is consistent with the hypothesis that, in late-network layers, individual SAE features can occupy functionally specialised roles in the computation~\cite{Elhage2021}.
-
-Figures~\ref{fig:heatmap} and~\ref{fig:dose_response} provide additional evidence for the causal role of Feature~5065.
-The spatial activation heatmap (Figure~\ref{fig:heatmap}) shows that the feature fires selectively on specific image regions, and the dose-response curve (Figure~\ref{fig:dose_response}) demonstrates a monotonically increasing logit drop as the ablation strength grows from 0\% to 100\%, confirming that the causal effect is genuine and not an artefact of the full-ablation point.
+Layer~6 features are dominated by low-level texture and geometric patterns, consistent with the role of mid-network MLP layers as local structure detectors \cite{Raghu2021}. At Layer~11, the vocabulary shifts towards semantically abstract concepts (\textit{animal}, \textit{plant}, \textit{bird}) alongside texture descriptors. Figure~\ref{fig:grid_layer11} shows the top-5 Layer~11 features by CLIP confidence.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{Figures/feature_activation_heatmap.png}
-  \caption{Spatial activation map for Feature~5065 (Layer~11, \textit{honeycomb pattern}).
-           Left: source image. Centre: patch-level SAE activation grid ($14{\times}14$).
-           Right: heatmap overlay. The feature activates selectively on spatially coherent regions,
-           consistent with monosemantic behaviour.}
-  \label{fig:heatmap}
+  \includegraphics[width=\columnwidth]{Figures/multi_feature_exemplar_grid_layer11.jpg}
+  \caption{Top-5 Layer~11 features. Each row: contextual crops, full images with highlighted patch, activation heatmaps. Feature~5065 (\textit{honeycomb pattern}) shows the highest causal impact (13.49\% RLD).}
+  \label{fig:grid_layer11}
 \end{figure}
+
+\subsection{Causal Analysis}
+
+Feature~5065 at Layer~11 (\textit{honeycomb pattern}) accounts for 13.49\% relative logit drop under ablation and 5.68\% increase under amplification; all remaining nine Layer~11 features show drops below 0.4\%. Figure~\ref{fig:causal} confirms the spatial selectivity of the feature and the genuineness of its causal contribution via a monotonically increasing dose-response curve.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{Figures/dose_response_curve.png}
-  \caption{Dose-response curve for Feature~5065 (Layer~11).
-           The monotonically increasing logit drop from 0\% (no ablation) to 13.49\%
-           (full ablation) confirms a genuine, graded causal contribution to the classification output.}
-  \label{fig:dose_response}
+  \begin{minipage}{0.48\columnwidth}
+    \includegraphics[width=\linewidth]{Figures/feature_activation_heatmap.png}
+  \end{minipage}\hfill
+  \begin{minipage}{0.48\columnwidth}
+    \includegraphics[width=\linewidth]{Figures/dose_response_curve.png}
+  \end{minipage}
+  \caption{Feature~5065. Left: spatial activation heatmap showing selective activation on coherent regions. Right: dose-response curve---monotonically increasing logit drop as ablation strength goes from 0 to 1.}
+  \label{fig:causal}
 \end{figure}
-
-\subsection{Human Evaluation}
-
-To complement the automated CLIP labelling, one team member independently inspected the top-$K$ contextual crops of each of the ten CLIP-labelled features per layer without prior knowledge of the assigned label, and proposed a concept based solely on visual content.
-For Layer~6, the human labels for the texture-dominant features (\textit{spotted pattern}, \textit{scale pattern}, \textit{honeycomb pattern}) were in agreement with the CLIP-assigned labels: the crops consistently depict repeating geometric or colour patterns that are unambiguous to a human observer.
-For Layer~11, the label agreement was highest for Feature~5065 (\textit{honeycomb pattern}), where both the CLIP label and the human assessment independently identified the same repeating hexagonal texture; this convergence, combined with the 13.49\% logit drop, constitutes the strongest evidence of monosemantic, causally relevant behaviour in our experiments.
-Agreement was weaker for features with near-zero causal impact (e.g., \textit{fur texture} at Layer~11, Feature~3932, with 0.00\% logit drop), where the crops show heterogeneous content that is consistent with polysemantic activation.
 
 \subsection{Discussion}
 
-Taken together, the results address the two gaps identified in Section~3. SAEs do recover structured, labellable features from the MLP activations of a purely visual ViT: all ten features at both depths receive a distinct CLIP label, and visual inspection confirms that top-activating crops are broadly consistent with those labels. Cross-modal evaluation via CLIP is therefore viable as a labelling strategy, at least at this scale --- CLIP, used as a detached external evaluator rather than as part of the model under study, provides enough signal to assign meaningful concept labels without requiring any internal language supervision.
-
-The depth-wise comparison sharpens the picture. Mid-network features are nearly all texture or pattern detectors with negligible individual causal footprint; this is expected, but it is reassuring that the SAE recovers the hierarchy rather than producing arbitrary directions. Late-network features shift towards object-level semantics, and here the causal picture changes sharply: Feature~5065 alone accounts for 13.49\% of the logit for its target class, while the remaining nine features are causally negligible.
-
-That concentration is the most unexpected finding. One interpretation is that Feature~5065 is unusually specialised for the specific evaluation image used (index 900 in the validation set): ablation and steering are conducted on a single image, so a feature that is causally decisive for that input may not be representative of late-network behaviour in general. Repeating the causal analysis across a larger image sample would clarify whether the same feature remains dominant or whether different features take the causal lead depending on the input. A second interpretation is that the ViT's late-network [CLS] token, already accumulating evidence towards a single classification decision, does so through a small number of highly loaded features rather than a distributed coalition --- a pattern that would distinguish it from the more diffuse causal structure reported for LLMs \cite{Elhage2021}. Both readings are consistent with the data; on the other side, what the dose-response curve establishes more robustly is that the causal effect of Feature~5065 is genuine and graded, not an artefact of a particular ablation strength.
+The results address both research gaps. SAEs recover structured, labellable features from purely visual MLP activations: all features at both depths receive distinct CLIP labels, confirmed by visual inspection. Human assessment independently validated CLIP labels for texture-dominant features; convergence on Feature~5065 (\textit{honeycomb pattern})---from both CLIP scoring and independent human review, combined with the 13.49\% logit drop---constitutes the strongest evidence of monosemantic, causally relevant behaviour. The depth-wise shift from texture detectors to semantic features reproduces the representational hierarchy expected from prior ViT analyses \cite{Raghu2021}. The concentration of causal impact on a single late-network feature is the most unexpected finding; it may reflect specialisation in the \texttt{[CLS]} accumulation mechanism, though a larger image sample is needed to confirm whether this pattern is input-specific or systematic.
