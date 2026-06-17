@@ -1,0 +1,85 @@
+% All tables and figures for page 4.
+% table* first so it spans both columns at the top of the page.
+% stfloats enables [H] on double-column floats.
+
+\begin{table*}[H]
+  \centering
+  \footnotesize
+  \caption{Ten most active features per layer. CLIP score: mean cosine similarity to top-$K$ crops. RLD: relative logit drop under full ablation ($s{=}0$). Steer: logit change under 5$\times$ amplification.}
+  \label{tab:feature_results}
+  \begin{tabular}{clcccc}
+    \toprule
+    Layer & Feature & CLIP concept & CLIP score & RLD (\%) & Steer (\%) \\
+    \midrule
+    6 & 4770 & spotted pattern   & 0.2669 & $+$0.04 & $+$0.16 \\
+    6 & 4271 & honeycomb pattern & 0.2651 & $-$0.04 & $-$0.03 \\
+    6 & 4506 & scale pattern     & 0.2536 & $+$0.69 & $+$1.78 \\
+    6 & 2719 & spotted pattern   & 0.2511 & $+$0.56 & $+$0.80 \\
+    6 & 2045 & pineapple         & 0.2487 & $+$0.03 & $+$0.11 \\
+    6 & 4608 & fur texture       & 0.2472 & $+$0.29 & $-$0.01 \\
+    6 & 5536 & spotted pattern   & 0.2481 & $-$0.10 & $-$1.20 \\
+    6 & 2041 & furniture         & 0.2476 & $+$0.06 & $+$0.17 \\
+    6 & 1632 & spotted pattern   & 0.2454 & $-$1.21 & $-$4.64 \\
+    6 & 4343 & scale pattern     & 0.2344 & $-$0.00 & $-$0.00 \\
+    \midrule
+    11 & \textbf{5065} & \textbf{honeycomb pattern} & \textbf{0.2970} & $\mathbf{+13.49}$ & $\mathbf{+5.68}$ \\
+    11 & 3932 & fur texture       & 0.2794 & $+$0.00 & $+$0.00 \\
+    11 & 965  & plant             & 0.2683 & $+$0.00 & $+$0.00 \\
+    11 & 540  & striped pattern   & 0.2578 & $+$0.00 & $+$0.02 \\
+    11 & 1767 & animal            & 0.2571 & $+$0.02 & $+$0.03 \\
+    11 & 5517 & pineapple         & 0.2477 & $+$0.36 & $+$0.50 \\
+    11 & 4488 & plant             & 0.2505 & $+$0.00 & $+$0.00 \\
+    11 & 2838 & animal            & 0.2339 & $+$0.05 & $+$0.15 \\
+    11 & 3591 & plant             & 0.2395 & $+$0.11 & $+$0.10 \\
+    11 & 5771 & bird              & 0.2508 & $-$0.00 & $-$0.00 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{SAE metrics and mean causal impact. $\bar{L}_0$: avg.\ active features per patch token.}
+  \label{tab:layer_metrics}
+  \begin{tabular}{lccc}
+    \toprule
+    Layer & R\textsuperscript{2} & $\bar{L}_0$ & Mean RLD \\
+    \midrule
+    6  (mid)  & 0.9957 & 201.72 & 0.03\% \\
+    11 (late) & 0.9477 & 107.90 & 1.40\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.60\columnwidth, trim=0 2098px 0 0, clip]{Figures/multi_feature_exemplar_grid_layer11.jpg}
+  \caption{Top-2 Layer~11 features (by CLIP confidence): \textit{honeycomb pattern} (5065) and \textit{fur texture} (3932). Each block: contextual crops, full images with highlighted patch, activation heatmaps. Feature~5065 exhibits the highest causal impact (13.49\% RLD).}
+  \label{fig:grid_layer11}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.60\columnwidth, trim=0 2098px 0 0, clip]{Figures/multi_feature_exemplar_grid_layer6.jpg}
+  \caption{Top-5 Layer~6 features (by CLIP confidence): \textit{spotted pattern} (4770), \textit{honeycomb pattern} (4271), \textit{scale pattern} (4506), \textit{spotted pattern} (2719), and \textit{pineapple} (2045). Each block: contextual crops, full images with highlighted patch, activation heatmaps. These mid-network features encode low-level texture and geometric patterns.}
+  \label{fig:grid_layer6}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\columnwidth]{Figures/sae_training_curves.png}
+  \caption{SAE training convergence for Layer~6 and Layer~11. Curves show loss, reconstruction quality (R\textsuperscript{2}), and sparsity ($L_0$) over training steps. Both layers converge stably; Layer~6 reaches R\textsuperscript{2}$=$0.9957 and Layer~11 reaches R\textsuperscript{2}$=$0.9477, confirming high-fidelity activation reconstruction.}
+  \label{fig:training_curves}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.48\columnwidth}
+    \includegraphics[width=\linewidth]{Figures/feature_activation_heatmap.png}
+  \end{minipage}\hfill
+  \begin{minipage}{0.48\columnwidth}
+    \includegraphics[width=\linewidth]{Figures/dose_response_curve.png}
+  \end{minipage}
+  \caption{Feature~5065 (Layer~11). Left: spatial activation heatmap showing selective activation on coherent image regions. Right: dose-response curve---monotonically increasing logit drop as ablation strength increases from 0 to 1.}
+  \label{fig:causal}
+\end{figure}

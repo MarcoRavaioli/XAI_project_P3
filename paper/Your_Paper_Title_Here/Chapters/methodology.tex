@@ -4,7 +4,7 @@ Our pipeline has four stages.
 We analyse ViT-B/16 \cite{Dosovitskiy2021} (12 transformer blocks, $d{=}768$, trained on ImageNet-1k) using 1,000 validation images paired with an 18-concept CLIP vocabulary spanning object categories (\textit{animal}, \textit{bird}, \textit{plant}, \ldots), textures (\textit{fur texture}, \textit{feather texture}, \ldots), and geometric patterns (\textit{spotted}, \textit{honeycomb}, \textit{scale}, \ldots).
 
 \paragraph{Activation extraction.}
-Forward hooks collect MLP output activations at Layer~6 (mid-network) and Layer~11 (late-network). Each image yields a $196{\times}768$ patch-token matrix per layer (\texttt{[CLS]} excluded), centred by the dataset-level mean before SAE training.
+Forward hooks collect MLP output activations at Layer~6 (mid-network) and Layer~11 (late-network). Each image yields a $196{\times}768$ patch-token matrix per layer (\texttt{[CLS]} excluded), centred via a learned decoder bias following~\cite{Bricken2023}.
 
 \paragraph{Sparse Autoencoder.}
 Given activation $\mathbf{x}\!\in\!\mathbb{R}^d$, the SAE produces a sparse code
@@ -26,3 +26,4 @@ Feature $k$ is ablated by subtracting its contribution from patch-token activati
   \text{RLD} = \frac{L_\text{baseline} - L_\text{ablated}}{|L_\text{baseline}|}.
 \end{equation}
 A dose-response sweep over ablation strength $s\!\in\![0,1]$ and a steering experiment ($s{=}5$, amplifying the feature's contribution) together rule out artefactual interpretations of the causal signal.
+All causal metrics are evaluated on a single representative validation image; cross-image robustness is left as future work.

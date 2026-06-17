@@ -7,8 +7,15 @@
 \acmConference[Explainable and Trustworthy AI -- Project]{}{}{}
 
 \usepackage{booktabs}
+\usepackage{float}
+\usepackage{stfloats}
 \graphicspath{{Figures/}}
 \setlength{\headheight}{16.36pt}
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\dbltopfraction}{0.9}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.5}
+\renewcommand{\dblfloatpagefraction}{0.5}
 
 \begin{document}
 
@@ -62,6 +69,9 @@ Sparse Autoencoder Feature Decomposition for Visual Concept Discovery}
 
 \section{Conclusions}
 \input{Chapters/conclusion}
+
+\clearpage
+\input{Chapters/floats}
 
 \bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
