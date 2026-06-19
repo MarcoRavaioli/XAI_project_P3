@@ -160,7 +160,7 @@ class CLIPAutoLabeler:
     Computes cosine similarity between patch crops and candidate semantic labels.
 
     Citations:
-        - Radhu et al. [2021] ("Do Vision Transformers See Like Convolutional Neural Networks?")
+        - Radford et al. [2021] ("Learning Transferable Visual Models From Natural Language Supervision")
     """
 
     def __init__(

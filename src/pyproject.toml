@@ -2,7 +2,6 @@
 name = "project3-xai"
 version = "0.1.0"
 description = "Mechanistic Interpretability of Vision Transformers using Sparse Autoencoders"
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "datasets>=5.0.0",

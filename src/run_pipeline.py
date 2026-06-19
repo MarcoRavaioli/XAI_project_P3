@@ -669,12 +669,6 @@ def main():
                 device=device,
                 context_patches=args.context_patches,
             )
-            if layer == 10:
-                import shutil
-
-                shutil.copy(
-                    grid_path, os.path.join(out_dir, "multi_feature_exemplar_grid.png")
-                )
 
             # Save individual feature grid visualizations for each feature
             for feat_idx, feat_data in layer_grid_features_dict.items():
