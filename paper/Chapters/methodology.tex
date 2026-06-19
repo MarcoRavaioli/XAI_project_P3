@@ -7,11 +7,11 @@ We analyse ViT-B/16 \cite{Dosovitskiy2021} (12 transformer blocks, $d{=}768$, tr
 Forward hooks collect MLP output activations at Layer~6 (mid-network) and Layer~11 (late-network). Each image yields a $196{\times}768$ patch-token matrix per layer (\texttt{[CLS]} excluded), centred via a learned decoder bias following~\cite{Bricken2023}.
 
 \paragraph{Sparse Autoencoder.}
-Given activation $\mathbf{x}\!\in\!\mathbb{R}^d$, the SAE produces a sparse code
+Given activation $\mathbf{x}\!\in\!\mathbb{R}^d$, the SAE first centres by subtracting a learned decoder bias and produces a sparse code
 \begin{equation}
-  \mathbf{z} = \text{ReLU}(\mathbf{W}_\text{enc}\mathbf{x} + \mathbf{b}_\text{enc}),\quad \mathbf{z}\!\in\!\mathbb{R}^m,
+  \mathbf{z} = \text{ReLU}\!\bigl(\mathbf{W}_\text{enc}(\mathbf{x} - \mathbf{b}_\text{dec}) + \mathbf{b}_\text{enc}\bigr),\quad \mathbf{z}\!\in\!\mathbb{R}^m,
 \end{equation}
-and reconstructs $\hat{\mathbf{x}} = \mathbf{W}_\text{dec}\mathbf{z}$ (unit-norm columns, $m{=}8d{=}6144$). Training minimises
+and reconstructs $\hat{\mathbf{x}} = \mathbf{W}_\text{dec}\mathbf{z} + \mathbf{b}_\text{dec}$ (unit-norm decoder columns, $m{=}8d{=}6144$). Training minimises
 \begin{equation}
   \mathcal{L} = \|\mathbf{x}-\hat{\mathbf{x}}\|_2^2 + \lambda\|\mathbf{z}\|_1
 \end{equation}
