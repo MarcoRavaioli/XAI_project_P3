@@ -1,37 +1,28 @@
 % All tables and figures for page 4.
 % table* first so it spans both columns at the top of the page.
-% stfloats enables [H] on double-column floats.
+% Double-column floats (table*) must use [t]/[b]/[p]; [H] is single-column only.
 
-\begin{table*}[H]
+\begin{table*}[t]
   \centering
   \footnotesize
-  \caption{Ten most active features per layer. CLIP score: mean cosine similarity to top-$K$ crops. RLD: relative logit drop under full ablation ($s{=}0$). Steer: logit change under 5$\times$ amplification.}
+  \caption{Representative SAE features of ViT-B/16. CLIP score: mean cosine similarity to the top-$K$ activating crops. RLD: mean relative logit drop under full ablation over the held-out evaluation set, with 95\% non-parametric bootstrap confidence interval. Acc: top-1 accuracy drop. Features labelled \emph{uncertain} fell within the per-layer CLIP abstention margin.}
   \label{tab:feature_results}
-  \begin{tabular}{clcccc}
+  \begin{tabular}{cllccc}
     \toprule
-    Layer & Feature & CLIP concept & CLIP score & RLD (\%) & Steer (\%) \\
+    Layer & Feature & CLIP concept & CLIP score & Mean RLD (\%) & 95\% CI (\%) \\
     \midrule
-    6 & 4770 & spotted pattern   & 0.2669 & $+$0.04 & $+$0.16 \\
-    6 & 4271 & honeycomb pattern & 0.2651 & $-$0.04 & $-$0.03 \\
-    6 & 4506 & scale pattern     & 0.2536 & $+$0.69 & $+$1.78 \\
-    6 & 2719 & spotted pattern   & 0.2511 & $+$0.56 & $+$0.80 \\
-    6 & 2045 & pineapple         & 0.2487 & $+$0.03 & $+$0.11 \\
-    6 & 4608 & fur texture       & 0.2472 & $+$0.29 & $-$0.01 \\
-    6 & 5536 & spotted pattern   & 0.2481 & $-$0.10 & $-$1.20 \\
-    6 & 2041 & furniture         & 0.2476 & $+$0.06 & $+$0.17 \\
-    6 & 1632 & spotted pattern   & 0.2454 & $-$1.21 & $-$4.64 \\
-    6 & 4343 & scale pattern     & 0.2344 & $-$0.00 & $-$0.00 \\
+    2  & 2391 & uncertain (texture)             & 0.233 & $+0.082$ & $[+0.036,\,+0.129]$ \\
     \midrule
-    11 & \textbf{5065} & \textbf{honeycomb pattern} & \textbf{0.2970} & $\mathbf{+13.49}$ & $\mathbf{+5.68}$ \\
-    11 & 3932 & fur texture       & 0.2794 & $+$0.00 & $+$0.00 \\
-    11 & 965  & plant             & 0.2683 & $+$0.00 & $+$0.00 \\
-    11 & 540  & striped pattern   & 0.2578 & $+$0.00 & $+$0.02 \\
-    11 & 1767 & animal            & 0.2571 & $+$0.02 & $+$0.03 \\
-    11 & 5517 & pineapple         & 0.2477 & $+$0.36 & $+$0.50 \\
-    11 & 4488 & plant             & 0.2505 & $+$0.00 & $+$0.00 \\
-    11 & 2838 & animal            & 0.2339 & $+$0.05 & $+$0.15 \\
-    11 & 3591 & plant             & 0.2395 & $+$0.11 & $+$0.10 \\
-    11 & 5771 & bird              & 0.2508 & $-$0.00 & $-$0.00 \\
+    9  & 2215 & Am.\ Staffordshire terrier      & 0.287 & $-0.084$ & $[-0.136,\,-0.036]$ \\
+    9  & 5038 & red fox                         & 0.300 & $-0.027$ & $[-0.052,\,-0.005]$ \\
+    \midrule
+    10 & \textbf{1321} & \textbf{American lobster} & \textbf{0.310} & $\mathbf{+0.564}$ & $\mathbf{[+0.168,\,+1.037]}$ \\
+    10 & 5609 & mortarboard                     & 0.323 & $+0.376$ & $[+0.060,\,+0.760]$ \\
+    10 & 2723 & garden spider                   & 0.326 & $+0.172$ & $[+0.031,\,+0.356]$ \\
+    \midrule
+    11 & 3508 & meerkat                         & 0.308 & $+0.227$ & $[+0.037,\,+0.486]$ \\
+    11 & 136  & mortarboard                     & 0.318 & $+0.152$ & $[-0.018,\,+0.369]$ \\
+    11 & 596  & cauliflower                     & 0.335 & $+0.039$ & $[+0.000,\,+0.117]$ \\
     \bottomrule
   \end{tabular}
 \end{table*}
@@ -39,47 +30,98 @@
 \begin{table}[H]
   \centering
   \small
-  \caption{SAE metrics and mean causal impact. $\bar{L}_0$: avg.\ active features per patch token.}
+  \caption{ViT-B/16 SAE metrics and mean causal impact across depths. $\bar{L}_0$: avg.\ active features per patch token. Mean RLD reported over the held-out evaluation set with 95\% bootstrap CI.}
   \label{tab:layer_metrics}
-  \begin{tabular}{lccc}
+  \begin{tabular}{lcccc}
     \toprule
-    Layer & R\textsuperscript{2} & $\bar{L}_0$ & Mean RLD \\
+    Layer & R\textsuperscript{2} & $\bar{L}_0$ & Mean RLD (\%) & 95\% CI (\%) \\
     \midrule
-    6  (mid)  & 0.9957 & 201.72 & 0.03\% \\
-    11 (late) & 0.9477 & 107.90 & 1.40\% \\
+    2  (early) & 0.684 & 58.1 & $+0.032$ & $[+0.020,+0.045]$ \\
+    9  (mid)   & 0.810 & 68.6 & $-0.019$ & $[-0.027,-0.012]$ \\
+    10 (late)  & 0.866 & 40.8 & $+0.104$ & $[+0.047,+0.169]$ \\
+    11 (late)  & 0.890 & 29.0 & $+0.078$ & $[+0.049,+0.112]$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{Causal ablation controls on ViT-B/16 (same evaluation split, same number of ablated units as the SAE-feature condition).}
+  \label{tab:causal_controls}
+  \begin{tabular}{lcccc}
+    \toprule
+    Layer & SAE features RLD (\%) & Random dirs RLD (\%) & Dead features RLD (\%) & Raw neurons RLD (\%) \\
+    \midrule
+    2  & $+0.032$ & $+0.005$ [$-0.020,+0.030$] & $+0.001$ [$-0.002,+0.004$] & $+0.020$ [$-0.040,+0.080$] \\
+    9  & $-0.019$ & $-0.002$ [$-0.025,+0.020$] & $+0.000$ [$-0.001,+0.001$] & $-0.010$ [$-0.060,+0.045$] \\
+    10 & $+0.104$ & $+0.008$ [$-0.025,+0.040$] & $+0.001$ [$-0.002,+0.003$] & $+0.050$ [$-0.070,+0.150$] \\
+    11 & $+0.078$ & $+0.006$ [$-0.018,+0.032$] & $+0.000$ [$-0.001,+0.002$] & $+0.045$ [$-0.060,+0.120$] \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{Supervised ViT-B/16 vs.\ self-supervised DINOv2-B under an \emph{identical} SAE recipe (expansion $8$, $20$ epochs, per-layer $\lambda$). DINOv2 attains $99.5\%$ linear-probe accuracy yet its dictionaries collapse to dead latents ($\bar{L}_0\!\to\!0$) at every depth except the mid-network Layer~9.}
+  \label{tab:backbone_compare}
+  \begin{tabular}{lcccc}
+    \toprule
+    & \multicolumn{2}{c}{ViT-B/16} & \multicolumn{2}{c}{DINOv2-B} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-5}
+    Layer & R\textsuperscript{2} & $\bar{L}_0$ & R\textsuperscript{2} & $\bar{L}_0$ \\
+    \midrule
+    2  & 0.684 & 58.1 & 0.087  & 0.86 \\
+    9  & 0.810 & 68.6 & 0.843  & 0.07 \\
+    10 & 0.866 & 40.8 & 0.089  & 0.02 \\
+    11 & 0.890 & 29.0 & $-0.006$ & 0.00 \\
     \bottomrule
   \end{tabular}
 \end{table}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.60\columnwidth, trim=0 2098px 0 0, clip]{Figures/multi_feature_exemplar_grid_layer11.jpg}
-  \caption{Top-2 Layer~11 features (by CLIP confidence): \textit{honeycomb pattern} (5065) and \textit{fur texture} (3932). Each block: contextual crops, full images with highlighted patch, activation heatmaps. Feature~5065 exhibits the highest causal impact (13.49\% RLD).}
-  \label{fig:grid_layer11}
+  \begin{minipage}{0.48\columnwidth}
+    \includegraphics[width=\linewidth]{Figures/vit_grid_lobster.png}
+  \end{minipage}\hfill
+  \begin{minipage}{0.48\columnwidth}
+    \includegraphics[width=\linewidth]{Figures/vit_grid_meerkat.png}
+  \end{minipage}
+  \caption{Two monosemantic late-layer ViT features. Left: \textit{American lobster} (Feature~1321, Layer~10), the most causal feature ($+0.564\%$ RLD). Right: \textit{meerkat} (Feature~3508, Layer~11). Each block shows activation-guided crops, full images with the peak patch (red) and activation region (green), and activation heatmaps. Heatmaps concentrate on the object, not the background.}
+  \label{fig:grid_semantic}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.60\columnwidth, trim=0 2098px 0 0, clip]{Figures/multi_feature_exemplar_grid_layer6.jpg}
-  \caption{Top-5 Layer~6 features (by CLIP confidence): \textit{spotted pattern} (4770), \textit{honeycomb pattern} (4271), \textit{scale pattern} (4506), \textit{spotted pattern} (2719), and \textit{pineapple} (2045). Each block: contextual crops, full images with highlighted patch, activation heatmaps. These mid-network features encode low-level texture and geometric patterns.}
-  \label{fig:grid_layer6}
+  \includegraphics[width=0.85\columnwidth, trim=0 1680px 0 0, clip]{Figures/vit_multilayer_layer2.png}
+  \caption{Early-layer (Layer~2) ViT features. All ten top features fall below the CLIP abstention margin (\emph{uncertain}); the exemplars and heatmaps reveal low-level texture and local-structure detectors rather than object concepts, consistent with the role of early MLP layers \cite{Raghu2021}.}
+  \label{fig:grid_early}
 \end{figure}
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\columnwidth]{Figures/sae_training_curves.png}
-  \caption{SAE training convergence for Layer~6 and Layer~11. Curves show loss, reconstruction quality (R\textsuperscript{2}), and sparsity ($L_0$) over training steps. Both layers converge stably; Layer~6 reaches R\textsuperscript{2}$=$0.9957 and Layer~11 reaches R\textsuperscript{2}$=$0.9477, confirming high-fidelity activation reconstruction.}
+  \begin{minipage}{0.95\columnwidth}
+    \includegraphics[width=\linewidth]{Figures/vit_training_curves.png}
+  \end{minipage}
+
+  \vspace{0.5em}
+
+  \begin{minipage}{0.95\columnwidth}
+    \includegraphics[width=\linewidth]{Figures/dino_training_curves.png}
+  \end{minipage}
+  \caption{SAE training convergence. Top: ViT-B/16 (Layers~2/9/10/11) converges stably to $R^2$ between $0.68$ and $0.89$ with non-trivial sparsity. Bottom: DINOv2-B under the identical recipe---only Layer~9 trains to a high $R^2$, while Layers~2/10/11 collapse ($\bar{L}_0\!\to\!0$, $R^2\!\le\!0.09$), the signature of an over-sparsified, dead dictionary.}
   \label{fig:training_curves}
 \end{figure}
 
 \begin{figure}[H]
   \centering
   \begin{minipage}{0.48\columnwidth}
-    \includegraphics[width=\linewidth]{Figures/feature_activation_heatmap.png}
+    \includegraphics[width=\linewidth]{Figures/vit_dose_response.png}
   \end{minipage}\hfill
   \begin{minipage}{0.48\columnwidth}
-    \includegraphics[width=\linewidth]{Figures/dose_response_curve.png}
+    \includegraphics[width=\linewidth]{Figures/dino_grid_layer9.png}
   \end{minipage}
-  \caption{Feature~5065 (Layer~11). Left: spatial activation heatmap showing selective activation on coherent image regions. Right: dose-response curve---monotonically increasing logit drop as ablation strength increases from 0 to 1.}
+  \caption{Left: dose-response curve for the strongest late-layer ViT feature---logit drop increases monotonically with ablation strength $s\!\in\![0,1]$, ruling out an artefactual causal signal. Right: the only causal DINOv2 feature (Layer~9, Feature~5653); although causal ($+0.60\%$ RLD), its exemplars (marquee, poodles, parrot, lobster) are visibly polysemantic, illustrating why matched-recipe SAEs yield poorly separated features on the self-supervised backbone.}
   \label{fig:causal}
 \end{figure}

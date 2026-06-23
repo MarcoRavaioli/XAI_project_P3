@@ -30,3 +30,6 @@ Feature $k$ is ablated by subtracting its contribution from patch-token activati
 \end{equation}
 Rather than relying on a single probe image, RLD is averaged over the held-out evaluation subset, and we report non-parametric bootstrap confidence intervals (per feature and per layer) so that causal claims are backed by their statistical spread rather than a single observation. A dose-response sweep over ablation strength $s\!\in\![0,1]$ and a steering experiment ($s{=}5$, amplifying the feature's contribution) together rule out artefactual interpretations of the causal signal. Where the dataset and model label spaces can be aligned, we additionally report the top-1 accuracy drop under ablation.
 
+\paragraph{Backbone comparison.}
+To test whether the recipe transfers across pre-training paradigms, we repeat the entire pipeline on a self-supervised DINOv2-B backbone \cite{Caron2021} with identical SAE settings (expansion~$8$, $20$ epochs, the same per-layer $\lambda$). As DINOv2 has no classification head, a linear probe is trained on frozen \texttt{[CLS]} embeddings over the training split to provide the logits required for causal evaluation.
+
