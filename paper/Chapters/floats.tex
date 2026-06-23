@@ -110,7 +110,7 @@
   \begin{minipage}{0.95\columnwidth}
     \includegraphics[width=\linewidth]{Figures/dino_training_curves.png}
   \end{minipage}
-  \caption{SAE training convergence. Top: ViT-B/16 (Layers~2/9/10/11) converges stably to $R^2$ between $0.68$ and $0.89$ with non-trivial sparsity. Bottom: DINOv2-B under the identical recipe---only Layer~9 trains to a high $R^2$, while Layers~2/10/11 collapse ($\bar{L}_0\!\to\!0$, $R^2\!\le\!0.09$), the signature of an over-sparsified, dead dictionary.}
+  \caption{SAE training convergence. Top: ViT-B/16 (Layers~2/9/10/11) converges stably to $R^2$ between $0.68$ and $0.89$ with non-trivial sparsity. Bottom: DINOv2-B under the identical recipe, where only Layer~9 trains to a high $R^2$, while Layers~2/10/11 collapse ($\bar{L}_0\!\to\!0$, $R^2\!\le\!0.09$), the signature of an over-sparsified, dead dictionary.}
   \label{fig:training_curves}
 \end{figure}
 
@@ -122,6 +122,6 @@
   \begin{minipage}{0.48\columnwidth}
     \includegraphics[width=\linewidth]{Figures/dino_grid_layer9.png}
   \end{minipage}
-  \caption{Left: dose-response curve for the strongest late-layer ViT feature---logit drop increases monotonically with ablation strength $s\!\in\![0,1]$, ruling out an artefactual causal signal. Right: the only causal DINOv2 feature (Layer~9, Feature~5653); although causal ($+0.60\%$ RLD), its exemplars (marquee, poodles, parrot, lobster) are visibly polysemantic, illustrating why matched-recipe SAEs yield poorly separated features on the self-supervised backbone.}
+  \caption{Left: dose-response curve for the strongest late-layer ViT feature; logit drop increases monotonically with ablation strength $s\!\in\![0,1]$, ruling out an artefactual causal signal. Right: the only causal DINOv2 feature (Layer~9, Feature~5653); although causal ($+0.60\%$ RLD), its exemplars (marquee, poodles, parrot, lobster) are visibly polysemantic, illustrating why matched-recipe SAEs yield poorly separated features on the self-supervised backbone.}
   \label{fig:causal}
 \end{figure}
