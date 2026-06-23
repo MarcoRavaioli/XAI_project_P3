@@ -1,10 +1,13 @@
-Our pipeline has four stages.
+Our pipeline has four stages: activation extraction from a frozen backbone, sparse decomposition, automated labelling, and causal verification.
 
 \paragraph{Backbone and data.}
-We analyse ViT-B/16 \cite{Dosovitskiy2021} (12 transformer blocks, $d{=}768$, trained on ImageNet-1k) using 1,000 validation images paired with an 18-concept CLIP vocabulary spanning object categories (\textit{animal}, \textit{bird}, \textit{plant}, \ldots), textures (\textit{fur texture}, \textit{feather texture}, \ldots), and geometric patterns (\textit{spotted}, \textit{honeycomb}, \textit{scale}, \ldots).
+We analyse ViT-B/16 \cite{Dosovitskiy2021} (12 transformer blocks, $d{=}768$, supervised pre-training on ImageNet-1k). Activations are collected on the validation split of ImageNet-100, a 100-class subset of ImageNet, using up to 5{,}000 images. To keep feature discovery and causal evaluation independent, the images are partitioned into disjoint training (70\%) and evaluation (30\%) subsets with a fixed seed: SAEs are fit and representative features are selected on the training subset, while every causal metric is measured on held-out evaluation images.
+
+\paragraph{Concept vocabulary.}
+Rather than a fixed hand-written list, the CLIP vocabulary is built dynamically: a curated base set of object categories, textures, and geometric patterns is augmented with aliases derived from the dataset class names, then deduplicated, filtered to remove degenerate strings, and capped at 80 concepts. This keeps the label space aligned with the data distribution while bounding the number of CLIP comparisons per feature.
 
 \paragraph{Activation extraction.}
-Forward hooks collect MLP output activations at Layer~6 (mid-network) and Layer~11 (late-network). Each image yields a $196{\times}768$ patch-token matrix per layer (\texttt{[CLS]} excluded), centred via a learned decoder bias following~\cite{Bricken2023}.
+Forward hooks collect MLP output activations at four depths spanning the network---an early layer (Layer~2) and three late layers (Layers~9--11)---chosen to trace the progression from low-level structure to semantic, output-aligned representations. Each image yields a $196{\times}768$ patch-token matrix per layer (\texttt{[CLS]} excluded), centred via a learned decoder bias following~\cite{Bricken2023}.
 
 \paragraph{Sparse Autoencoder.}
 Given activation $\mathbf{x}\!\in\!\mathbb{R}^d$, the SAE first centres by subtracting a learned decoder bias and produces a sparse code
@@ -15,15 +18,15 @@ and reconstructs $\hat{\mathbf{x}} = \mathbf{W}_\text{dec}\mathbf{z} + \mathbf{b
 \begin{equation}
   \mathcal{L} = \|\mathbf{x}-\hat{\mathbf{x}}\|_2^2 + \lambda\|\mathbf{z}\|_1
 \end{equation}
-(Adam, lr$\!=\!10^{-3}$, $\lambda\!=\!10^{-3}$, batch 256; 5 epochs for Layer~6, 15 for Layer~11).
+(Adam, lr$\!=\!10^{-3}$, batch 256, 20 epochs). The sparsity coefficient $\lambda$ is tuned per layer to balance reconstruction fidelity ($R^2$) against code sparsity ($L_0$), with sparser codes favoured at later layers.
 
 \paragraph{CLIP labelling.}
-The $K{=}5$ highest-activating crops per feature are matched to the vocabulary via mean cosine similarity to \textit{``a photo of \{concept\}''} prompts \cite{Radford2021}. A feature is characterised as monosemantic when the CLIP-assigned label is confirmed by visual inspection of the top-activating crops.
+For each feature we extract the $K{=}5$ highest-activating image crops. Crops are activation-guided: instead of a fixed window around the single peak patch, the crop follows the contiguous high-activation region (thresholded at an activation quantile) so the matched region reflects what the feature actually responds to. Each crop is scored against the vocabulary by mean cosine similarity to a set of prompt templates (e.g.\ \textit{``a photo of \{concept\}''}) \cite{Radford2021}. A feature receives its top-scoring concept as label, but is marked \emph{uncertain} (abstention) when the top two concepts fall within a per-layer confidence margin---avoiding spurious labels on polysemantic or texture-only channels.
 
 \paragraph{Causal verification.}
 Feature $k$ is ablated by subtracting its contribution from patch-token activations: $\mathbf{x}' = \mathbf{x} - f_k(\mathbf{x})\,\mathbf{W}_\text{dec}[:,k]$. Causal impact is quantified via the Relative Logit Drop (RLD):
 \begin{equation}
   \text{RLD} = \frac{L_\text{baseline} - L_\text{ablated}}{|L_\text{baseline}|}.
 \end{equation}
-A dose-response sweep over ablation strength $s\!\in\![0,1]$ and a steering experiment ($s{=}5$, amplifying the feature's contribution) together rule out artefactual interpretations of the causal signal.
-All causal metrics are evaluated on a single representative validation image; cross-image robustness is left as future work.
+Rather than relying on a single probe image, RLD is averaged over the held-out evaluation subset, and we report non-parametric bootstrap confidence intervals (per feature and per layer) so that causal claims are backed by their statistical spread rather than a single observation. A dose-response sweep over ablation strength $s\!\in\![0,1]$ and a steering experiment ($s{=}5$, amplifying the feature's contribution) together rule out artefactual interpretations of the causal signal. Where the dataset and model label spaces can be aligned, we additionally report the top-1 accuracy drop under ablation.
+

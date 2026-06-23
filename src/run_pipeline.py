@@ -11,8 +11,6 @@ import numpy as np
 import torch
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Dataset
-from torchvision.datasets import CIFAR10
-from torchvision.transforms import InterpolationMode
 
 from caching_and_training import TokenActivationBuffer, train_sae
 from causal_eval import (
@@ -93,14 +91,20 @@ def parse_args():
         "--dataset",
         type=str,
         default="imagenet",
-        choices=["cifar10", "imagewoof", "imagenette", "imagenet"],
-        help="Target dataset paradigm ('cifar10', 'imagewoof', 'imagenette', 'imagenet')",
+        choices=["imagewoof", "imagenette", "imagenet"],
+        help="Target dataset paradigm ('imagewoof', 'imagenette', 'imagenet')",
     )
     parser.add_argument(
         "--dataset_path",
         type=str,
         default="./data",
         help="Local file path directory for custom datasets",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="out",
+        help="Directory for all generated artifacts (use a distinct value to avoid overwriting previous runs)",
     )
     parser.add_argument(
         "--eval_image_idx",
@@ -567,7 +571,7 @@ def main():
     model_wrapper = ViTModelWrapper(model_name=args.model, device=device)
 
     # Output directory for all generated artifacts
-    out_dir = "out"
+    out_dir = args.output_dir
     os.makedirs(out_dir, exist_ok=True)
 
     # 3. Data Loader setup
@@ -606,16 +610,6 @@ def main():
         f"Derived image size: {target_size}, normalization mean: {mean}, std: {std}"
     )
 
-    # Lanczos preserves sharp edges when upscaling low-res datasets (e.g. CIFAR 32x32 → 224x224)
-    cifar_transform = transforms.Compose(
-        [
-            transforms.Resize(
-                (target_size, target_size), interpolation=InterpolationMode.LANCZOS
-            ),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std),
-        ]
-    )
     resize_size = int(target_size * 256 / 224) if target_size else 256
     imagenet_style_transform = transforms.Compose(
         [
@@ -626,40 +620,20 @@ def main():
         ]
     )
 
-    if args.dataset == "cifar10":
-        logger.info("Setting up CIFAR-10 test dataset (Lanczos upscaling)...")
-        dataset = CIFAR10(
-            root=args.dataset_path,
-            train=False,
-            download=True,
-            transform=cifar_transform,
-        )
-    elif args.dataset == "imagewoof":
-        try:
-            val_dir = check_and_download_imagewoof(args.dataset_path)
-            logger.info(f"Setting up ImageWoof dataset from {val_dir}...")
-            from torchvision.datasets import ImageFolder
+    if args.dataset == "imagewoof":
+        val_dir = check_and_download_imagewoof(args.dataset_path)
+        logger.info(f"Setting up ImageWoof dataset from {val_dir}...")
+        from torchvision.datasets import ImageFolder
 
-            dataset = ImageFolder(root=val_dir, transform=imagenet_style_transform)
-        except Exception as e:
-            logger.warning(f"Could not load ImageWoof: {e}. Falling back to CIFAR-10.")
-            dataset = CIFAR10(
-                root="./data", train=False, download=True, transform=cifar_transform
-            )
+        dataset = ImageFolder(root=val_dir, transform=imagenet_style_transform)
     elif args.dataset == "imagenette":
-        try:
-            val_dir = check_and_download_imagenette(args.dataset_path)
-            logger.info(
-                f"Setting up ImageNette (10-class ImageNet subset) from {val_dir}..."
-            )
-            from torchvision.datasets import ImageFolder
+        val_dir = check_and_download_imagenette(args.dataset_path)
+        logger.info(
+            f"Setting up ImageNette (10-class ImageNet subset) from {val_dir}..."
+        )
+        from torchvision.datasets import ImageFolder
 
-            dataset = ImageFolder(root=val_dir, transform=imagenet_style_transform)
-        except Exception as e:
-            logger.warning(f"Could not load ImageNette: {e}. Falling back to CIFAR-10.")
-            dataset = CIFAR10(
-                root="./data", train=False, download=True, transform=cifar_transform
-            )
+        dataset = ImageFolder(root=val_dir, transform=imagenet_style_transform)
     elif args.dataset == "imagenet":
         # ImageNet-100: try local path first, then HuggingFace datasets
         target_path = args.dataset_path
@@ -672,26 +646,16 @@ def main():
             logger.info(f"Setting up ImageNet-100 from local path {target_path}...")
             dataset = ImageFolder(root=target_path, transform=imagenet_style_transform)
         else:
-            try:
-                from datasets import load_dataset
+            from datasets import load_dataset
 
-                logger.info(
-                    "Local ImageNet-100 not found. Downloading via HuggingFace datasets..."
-                )
-                hf_ds = load_dataset("clane9/imagenet-100", split="validation")
-                dataset = HFImageDataset(hf_ds, transform=imagenet_style_transform)
-                logger.info(
-                    f"ImageNet-100 loaded from HuggingFace ({len(dataset)} images)."
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Could not load ImageNet-100: {e}. Falling back to CIFAR-10. "
-                    "To use ImageNet-100, either provide a local path via --dataset_path "
-                    "or install the 'datasets' library (pip install datasets)."
-                )
-                dataset = CIFAR10(
-                    root="./data", train=False, download=True, transform=cifar_transform
-                )
+            logger.info(
+                "Local ImageNet-100 not found. Downloading via HuggingFace datasets..."
+            )
+            hf_ds = load_dataset("clane9/imagenet-100", split="validation")
+            dataset = HFImageDataset(hf_ds, transform=imagenet_style_transform)
+            logger.info(
+                f"ImageNet-100 loaded from HuggingFace ({len(dataset)} images)."
+            )
     else:
         target_path = args.dataset_path
         if target_path == "./data":
@@ -700,25 +664,12 @@ def main():
         logger.info(f"Setting up {args.dataset} dataset from path {target_path}...")
         from torchvision.datasets import ImageFolder
 
-        if os.path.exists(target_path):
-            try:
-                dataset = ImageFolder(
-                    root=target_path, transform=imagenet_style_transform
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to load ImageFolder at {target_path}: {e}. Falling back to CIFAR-10."
-                )
-                dataset = CIFAR10(
-                    root="./data", train=False, download=True, transform=cifar_transform
-                )
-        else:
-            logger.warning(
-                f"Dataset path {target_path} not found. Falling back to CIFAR-10."
+        if not os.path.exists(target_path):
+            raise FileNotFoundError(
+                f"Dataset path {target_path} not found. Provide a valid ImageFolder "
+                "directory via --dataset_path."
             )
-            dataset = CIFAR10(
-                root="./data", train=False, download=True, transform=cifar_transform
-            )
+        dataset = ImageFolder(root=target_path, transform=imagenet_style_transform)
 
     subset = torch.utils.data.Subset(
         dataset, range(min(args.subset_size, len(dataset)))
@@ -899,32 +850,10 @@ def main():
             "eye",
             "scale pattern",
         ],
-        "cifar10": [
-            "airplane",
-            "automobile",
-            "bird",
-            "cat",
-            "deer",
-            "dog",
-            "frog",
-            "horse",
-            "ship",
-            "truck",
-            "sky",
-            "water",
-            "grass",
-            "road",
-            "wheel",
-            "wing",
-            "fur",
-            "eye",
-            "metal texture",
-            "stripe",
-        ],
     }
     base_concepts = dataset_concepts.get(
         args.dataset,
-        dataset_concepts["cifar10"],
+        dataset_concepts["imagenet"],
     )
     if args.disable_dynamic_concepts:
         candidate_concepts = _dedupe_concepts(base_concepts)

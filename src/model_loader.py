@@ -1,16 +1,17 @@
+import logging
 import os
 import random
-import logging
+from typing import Any, Callable, Dict, Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
-from typing import Dict, Any, Callable, Optional
 from torch.utils.data import DataLoader
 from transformers import (
-    ViTForImageClassification,
-    Dinov2Model,
-    ViTImageProcessor,
     AutoImageProcessor,
+    Dinov2Model,
+    ViTForImageClassification,
+    ViTImageProcessor,
 )
 
 logger = logging.getLogger(__name__)
@@ -195,7 +196,7 @@ class ViTModelWrapper:
 
 def get_num_classes(dataset) -> int:
     """
-    Statically extracts the number of classes from CIFAR10, ImageFolder, or Hugging Face Dataset.
+    Statically extracts the number of classes from an ImageFolder or Hugging Face Dataset.
     """
     base_dataset = dataset
     while hasattr(base_dataset, "dataset"):
