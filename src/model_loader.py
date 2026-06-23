@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from typing import Dict, Any, Callable, Optional
+from torch.utils.data import DataLoader
 from transformers import (
     ViTForImageClassification,
     Dinov2Model,
@@ -84,7 +85,7 @@ class ViTModelWrapper:
     """
     Wrapper around pre-trained Hugging Face Vision Transformers (ViT & DINOv2)
     to simplify backbone loading, dynamic patch size configuration, and
-    caching activation streams across layers 6 and 11.
+    caching activation streams across arbitrary layers.
     """
 
     def __init__(
@@ -112,6 +113,7 @@ class ViTModelWrapper:
         self.model.eval()
 
         self.d_model = self.model.config.hidden_size
+        self.probe = None
         logger.info(
             f"Model loaded. Type: {self.model_type}, Patch Size: {self.patch_size}, Grid Size: {self.grid_size}, d_model: {self.d_model}"
         )
@@ -161,3 +163,134 @@ class ViTModelWrapper:
             raise ValueError(
                 f"Unknown target_type: {target_type}. Must be 'mlp' or 'residual'"
             )
+
+    def train_linear_probe(self, dataloader: DataLoader):
+        """
+        Trains and registers a linear probe for models without a classification head.
+        """
+        probe = train_linear_probe(self, dataloader, self.device)
+        probe.to(self.device)
+        probe.eval()
+        self.probe = probe
+
+    def get_logits(self, outputs: Any) -> torch.Tensor:
+        """
+        Extracts logits from model outputs, using the trained linear probe
+        as a fallback for models without a classification head.
+        """
+        if hasattr(outputs, "logits"):
+            return outputs.logits
+        elif self.probe is not None:
+            if hasattr(outputs, "last_hidden_state"):
+                cls_emb = outputs.last_hidden_state[:, 0]
+            else:
+                cls_emb = outputs[0][:, 0]
+            return self.probe(cls_emb)
+        else:
+            if hasattr(outputs, "last_hidden_state"):
+                return outputs.last_hidden_state[:, 0]
+            else:
+                return outputs[0][:, 0]
+
+
+def get_num_classes(dataset) -> int:
+    """
+    Statically extracts the number of classes from CIFAR10, ImageFolder, or Hugging Face Dataset.
+    """
+    base_dataset = dataset
+    while hasattr(base_dataset, "dataset"):
+        if isinstance(base_dataset, torch.utils.data.Subset):
+            base_dataset = base_dataset.dataset
+        else:
+            break
+
+    if hasattr(base_dataset, "classes") and base_dataset.classes is not None:
+        return len(base_dataset.classes)
+
+    if hasattr(base_dataset, "dataset") and hasattr(base_dataset.dataset, "features"):
+        features = base_dataset.dataset.features
+        if "label" in features and hasattr(features["label"], "num_classes"):
+            return features["label"].num_classes
+
+    if hasattr(base_dataset, "dataset") and hasattr(base_dataset.dataset, "info") and hasattr(base_dataset.dataset.info, "features"):
+        features = base_dataset.dataset.info.features
+        if "label" in features and hasattr(features["label"], "num_classes"):
+            return features["label"].num_classes
+
+    try:
+        labels = [base_dataset[i][1] for i in range(min(100, len(base_dataset)))]
+        return max(labels) + 1
+    except Exception:
+        return 10
+
+
+def train_linear_probe(
+    model_wrapper: "ViTModelWrapper",
+    dataloader: DataLoader,
+    device: str,
+) -> nn.Linear:
+    """
+    Trains a linear probe on top of frozen CLS embeddings from the vision transformer backbone.
+    """
+    model_wrapper.model.eval()
+    
+    embeddings = []
+    labels = []
+    
+    with torch.no_grad():
+        for batch in dataloader:
+            images = batch[0].to(device)
+            batch_labels = batch[1].to(device)
+            
+            outputs = model_wrapper.model(images)
+            if hasattr(outputs, "last_hidden_state"):
+                emb = outputs.last_hidden_state[:, 0]
+            elif hasattr(outputs, "logits"):
+                emb = outputs.logits
+            else:
+                emb = outputs[0][:, 0]
+            
+            embeddings.append(emb.cpu())
+            labels.append(batch_labels.cpu())
+            
+    embeddings = torch.cat(embeddings, dim=0)
+    labels = torch.cat(labels, dim=0)
+    
+    num_classes = get_num_classes(dataloader.dataset)
+    d_model = embeddings.shape[1]
+    
+    logger.info(f"Training linear probe on {embeddings.shape[0]} samples with {num_classes} classes...")
+    
+    probe = nn.Linear(d_model, num_classes).to(device)
+    optimizer = torch.optim.AdamW(probe.parameters(), lr=1e-2, weight_decay=1e-4)
+    criterion = nn.CrossEntropyLoss()
+    
+    probe.train()
+    dataset_size = embeddings.shape[0]
+    batch_size = min(32, dataset_size)
+    
+    for epoch in range(10):
+        indices = torch.randperm(dataset_size)
+        epoch_loss = 0.0
+        correct = 0
+        
+        for start_idx in range(0, dataset_size, batch_size):
+            batch_idx = indices[start_idx : start_idx + batch_size]
+            x_batch = embeddings[batch_idx].to(device)
+            y_batch = labels[batch_idx].to(device)
+            
+            optimizer.zero_grad()
+            preds = probe(x_batch)
+            loss = criterion(preds, y_batch)
+            loss.backward()
+            optimizer.step()
+            
+            epoch_loss += loss.item() * x_batch.shape[0]
+            correct += (preds.argmax(dim=-1) == y_batch).sum().item()
+            
+        acc = (correct / dataset_size) * 100.0
+        logger.debug(f"Linear Probe Epoch {epoch+1}/10 | Loss: {epoch_loss/dataset_size:.4f} | Accuracy: {acc:.2f}%")
+        
+    probe.eval()
+    logger.info(f"Linear probe training complete. Final Accuracy: {acc:.2f}%")
+    return probe

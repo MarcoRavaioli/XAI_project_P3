@@ -1,6 +1,4 @@
-def main():
-    print("project3-xai")
-
+from run_pipeline import main
 
 if __name__ == "__main__":
     main()

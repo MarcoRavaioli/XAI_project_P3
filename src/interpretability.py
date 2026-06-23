@@ -2,13 +2,14 @@ import os
 
 os.environ["MPLBACKEND"] = "agg"
 import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from typing import List, Dict, Any, Tuple
-import numpy as np
 from transformers import CLIPModel, CLIPProcessor
 
-from model_loader import ViTModelWrapper, ActivationHook
+from model_loader import ActivationHook, ViTModelWrapper
 from sae import SparseAutoencoder
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,88 @@ def extract_contextual_crop(
     return image[:, row_start:row_end, col_start:col_end]
 
 
+def extract_activation_guided_crop(
+    image: torch.Tensor,
+    feature_map: Optional[torch.Tensor],
+    patch_size: int,
+    grid_size: int,
+    context_patches: int = 2,
+    activation_quantile: float = 0.9,
+    min_active_tokens: int = 4,
+    max_crop_tokens_per_side: int = 9,
+) -> Tuple[Optional[torch.Tensor], Optional[Dict[str, int]]]:
+    """
+    Extract a crop centered on the high-activation region (not just a single max patch).
+    Returns both crop tensor and the bounding box in image pixel coordinates.
+    """
+    if feature_map is None:
+        return None, None
+
+    fmap = feature_map.detach().cpu().numpy()
+    if fmap.ndim == 1:
+        if fmap.shape[0] != grid_size * grid_size:
+            return None, None
+        fmap = fmap.reshape(grid_size, grid_size)
+    elif fmap.shape != (grid_size, grid_size):
+        return None, None
+
+    positive_vals = fmap[fmap > 0.0]
+    if positive_vals.size == 0:
+        return None, None
+
+    q = float(np.quantile(positive_vals, activation_quantile))
+    active_mask = fmap >= q
+
+    # Keep at least a few active tokens to avoid degenerate 1-token crops.
+    if int(active_mask.sum()) < int(max(1, min_active_tokens)):
+        topk = min(int(max(1, min_active_tokens)), fmap.size)
+        topk_idx = np.argpartition(fmap.reshape(-1), -topk)[-topk:]
+        active_mask = np.zeros_like(fmap, dtype=bool)
+        active_mask.reshape(-1)[topk_idx] = True
+
+    rows, cols = np.where(active_mask)
+    if len(rows) == 0 or len(cols) == 0:
+        return None, None
+
+    row_min = max(0, int(rows.min()) - context_patches)
+    row_max = min(grid_size - 1, int(rows.max()) + context_patches)
+    col_min = max(0, int(cols.min()) - context_patches)
+    col_max = min(grid_size - 1, int(cols.max()) + context_patches)
+
+    if max_crop_tokens_per_side > 0:
+        peak_flat = int(np.argmax(fmap))
+        peak_row = peak_flat // grid_size
+        peak_col = peak_flat % grid_size
+
+        def _cap_span(lo: int, hi: int, peak: int) -> Tuple[int, int]:
+            span = hi - lo + 1
+            if span <= max_crop_tokens_per_side:
+                return lo, hi
+            half = max_crop_tokens_per_side // 2
+            new_lo = max(0, peak - half)
+            new_hi = new_lo + max_crop_tokens_per_side - 1
+            if new_hi >= grid_size:
+                new_hi = grid_size - 1
+                new_lo = max(0, new_hi - max_crop_tokens_per_side + 1)
+            return new_lo, new_hi
+
+        row_min, row_max = _cap_span(row_min, row_max, peak_row)
+        col_min, col_max = _cap_span(col_min, col_max, peak_col)
+
+    row_start = row_min * patch_size
+    row_end = (row_max + 1) * patch_size
+    col_start = col_min * patch_size
+    col_end = (col_max + 1) * patch_size
+
+    bbox = {
+        "x": int(col_start),
+        "y": int(row_start),
+        "w": int(col_end - col_start),
+        "h": int(row_end - row_start),
+    }
+    return image[:, row_start:row_end, col_start:col_end], bbox
+
+
 def get_top_activating_patches(
     model_wrapper: ViTModelWrapper,
     sae: SparseAutoencoder,
@@ -120,25 +203,25 @@ def get_top_activating_patches(
             feature_activation = f[:, :, feature_idx]  # [batch_size, num_patches]
 
             # Identify high activations within the batch (taking the maximum activation per image)
+            max_vals, max_idxs = feature_activation.max(dim=1)  # shapes: [batch_size]
             for b in range(images.shape[0]):
                 img_tensor = batch[0][b]  # prevent memory leak
-                max_act_val = -1.0
-                max_p = -1
-                for p in range(feature_activation.shape[1]):
-                    act_val = feature_activation[b, p].item()
-                    if act_val > max_act_val:
-                        max_act_val = act_val
-                        max_p = p
+                max_act_val = max_vals[b].item()
+                max_p = max_idxs[b].item()
 
                 if max_act_val > 0.0:
                     crop = extract_patch_crop(img_tensor, max_p, patch_size, grid_size)
+                    feature_map = feature_activation[b].detach().cpu()
+                    label = batch[1][b].item() if len(batch) > 1 else 0
                     exemplar = {
                         "activation": max_act_val,
                         "crop": crop,
                         "full_image": img_tensor,
+                        "feature_map": feature_map,
                         "spatial_idx": max_p,
                         "batch_idx": batch_idx,
                         "img_idx_in_batch": b,
+                        "label": label,
                     }
 
                     top_exemplars.append(exemplar)
@@ -179,7 +262,15 @@ class CLIPAutoLabeler:
         patch_size: int = 16,
         grid_size: int = 14,
         context_patches: int = 2,
-    ) -> Tuple[str, float, Dict[str, float]]:
+        mean: np.ndarray = None,
+        std: np.ndarray = None,
+        top_k: int = 3,
+        uncertainty_margin: float = 0.01,
+        prompt_templates: List[str] = None,
+        activation_crop_quantile: float = 0.9,
+        activation_crop_min_tokens: int = 4,
+        activation_crop_max_tokens: int = 9,
+    ) -> Tuple[str, float, Dict[str, float], Dict[str, Any]]:
         """
         Assigns a semantic concept from candidates to the SAE feature using exemplar similarity.
 
@@ -187,28 +278,59 @@ class CLIPAutoLabeler:
             exemplars: List of top exemplar dictionaries containing the image crop tensors.
             candidate_concepts: List of candidate labels.
         Output:
-            best_concept: Concept exhibiting the highest mean similarity.
+            assigned_concept: Either the best concept or 'uncertain' when margin is too small.
             best_score: Average similarity score for that concept.
             all_scores: Average similarity scores for all candidate concepts.
+            metadata: Dict with raw best concept, uncertainty flag, margin, and top-k concepts.
         """
         if not exemplars:
-            return "inactive", 0.0, {c: 0.0 for c in candidate_concepts}
+            return (
+                "inactive",
+                0.0,
+                {c: 0.0 for c in candidate_concepts},
+                {
+                    "best_raw_concept": "inactive",
+                    "is_uncertain": False,
+                    "margin_top1_top2": 0.0,
+                    "top_concepts": [],
+                },
+            )
 
-        # ImageNet/CIFAR-10 normalization values to unnormalize crops for CLIP
-        mean = np.array([0.485, 0.456, 0.406])
-        std = np.array([0.229, 0.224, 0.225])
+        if prompt_templates is None:
+            prompt_templates = [
+                "a photo of {concept}",
+                "a close-up photo of {concept}",
+                "an image featuring {concept}",
+            ]
+
+        # Use passed or default normalization values to unnormalize crops for CLIP
+        if mean is None:
+            mean = np.array([0.485, 0.456, 0.406])
+        if std is None:
+            std = np.array([0.229, 0.224, 0.225])
 
         # Use contextual crops centered around the active patch
         images_for_clip = []
         for ex in exemplars:
             if "full_image" in ex and "spatial_idx" in ex:
-                crop_tensor = extract_contextual_crop(
+                crop_tensor, _ = extract_activation_guided_crop(
                     image=ex["full_image"],
-                    spatial_idx=ex["spatial_idx"],
+                    feature_map=ex.get("feature_map"),
                     patch_size=patch_size,
                     grid_size=grid_size,
                     context_patches=context_patches,
+                    activation_quantile=activation_crop_quantile,
+                    min_active_tokens=activation_crop_min_tokens,
+                    max_crop_tokens_per_side=activation_crop_max_tokens,
                 )
+                if crop_tensor is None:
+                    crop_tensor = extract_contextual_crop(
+                        image=ex["full_image"],
+                        spatial_idx=ex["spatial_idx"],
+                        patch_size=patch_size,
+                        grid_size=grid_size,
+                        context_patches=context_patches,
+                    )
             else:
                 crop_tensor = ex["crop"]
 
@@ -224,7 +346,12 @@ class CLIPAutoLabeler:
         )
         image_inputs = {k: v.to(self.device) for k, v in image_inputs.items()}
 
-        formatted_texts = [f"a photo of {concept}" for concept in candidate_concepts]
+        concept_prompt_pairs = []
+        for concept in candidate_concepts:
+            for template in prompt_templates:
+                concept_prompt_pairs.append((concept, template.format(concept=concept)))
+
+        formatted_texts = [prompt for _, prompt in concept_prompt_pairs]
         text_inputs = self.processor(
             text=formatted_texts, text_kwargs={"return_tensors": "pt", "padding": True}
         )
@@ -252,24 +379,39 @@ class CLIPAutoLabeler:
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
-            # Cosine similarity matrix: [num_exemplars, num_concepts]
+            # Cosine similarity matrix: [num_exemplars, num_prompts]
             similarity_matrix = torch.matmul(image_features, text_features.t())
-            mean_similarities = (
-                similarity_matrix.mean(dim=0).cpu().numpy()
-            )  # avg similarity
+
+        sim_np = similarity_matrix.mean(dim=0).cpu().numpy()
+        aggregated_scores: Dict[str, List[float]] = {c: [] for c in candidate_concepts}
+        for idx, (concept, _) in enumerate(concept_prompt_pairs):
+            aggregated_scores[concept].append(float(sim_np[idx]))
 
         all_scores = {
-            concept: float(mean_similarities[idx])
-            for idx, concept in enumerate(candidate_concepts)
+            concept: float(np.mean(scores)) if scores else 0.0
+            for concept, scores in aggregated_scores.items()
         }
-        best_idx = np.argmax(mean_similarities)
-        best_concept = candidate_concepts[best_idx]
-        best_score = float(mean_similarities[best_idx])
+
+        ranked = sorted(all_scores.items(), key=lambda x: x[1], reverse=True)
+        best_concept, best_score = ranked[0]
+        top_concepts = ranked[: max(1, top_k)]
+        second_score = ranked[1][1] if len(ranked) > 1 else best_score
+        margin = float(best_score - second_score)
+        is_uncertain = margin < uncertainty_margin
+        assigned_concept = "uncertain" if is_uncertain else best_concept
 
         logger.info(
-            f"Feature Auto-labeled as: '{best_concept}' (score: {best_score:.4f})"
+            "Feature Auto-labeled as: "
+            f"'{assigned_concept}' (best='{best_concept}', score={best_score:.4f}, margin={margin:.4f})"
         )
-        return best_concept, best_score, all_scores
+
+        metadata = {
+            "best_raw_concept": best_concept,
+            "is_uncertain": bool(is_uncertain),
+            "margin_top1_top2": margin,
+            "top_concepts": top_concepts,
+        }
+        return assigned_concept, float(best_score), all_scores, metadata
 
 
 def get_feature_activation_map(
@@ -345,14 +487,17 @@ def save_feature_grid_visualization(
     import matplotlib
 
     matplotlib.use("agg")
-    import matplotlib.pyplot as plt
     import matplotlib.patches as patches
+    import matplotlib.pyplot as plt
     from matplotlib.colors import Normalize
     from PIL import Image as PILImage
 
-    # ImageNet/CIFAR-10 normalization values to unnormalize images for display
-    mean = np.array([0.485, 0.456, 0.406])
-    std = np.array([0.229, 0.224, 0.225])
+    # Derive normalization constants from processor if available, otherwise use defaults
+    processor = getattr(model_wrapper, "processor", None)
+    mean_val = getattr(processor, "image_mean", [0.485, 0.456, 0.406])
+    std_val = getattr(processor, "image_std", [0.229, 0.224, 0.225])
+    mean = np.array(mean_val)
+    std = np.array(std_val)
 
     feature_indices = list(top_features_dict.keys())
     num_features = len(feature_indices)
@@ -446,25 +591,36 @@ def save_feature_grid_visualization(
             ex = exemplars[c]
             act = ex["activation"]
             spatial_idx = ex.get("spatial_idx", None)
+            activation_bbox = None
 
             # --- Row 1: Context Crop ---
             if "full_image" in ex and spatial_idx is not None:
-                crop_tensor = extract_contextual_crop(
+                crop_tensor, activation_bbox = extract_activation_guided_crop(
                     image=ex["full_image"],
-                    spatial_idx=spatial_idx,
+                    feature_map=ex.get("feature_map"),
                     patch_size=patch_size,
                     grid_size=grid_size,
                     context_patches=context_patches,
                 )
-                
-                # Compute offsets of the central patch within this crop
-                row_coord = spatial_idx // grid_size
-                col_coord = spatial_idx % grid_size
-                row_start_patch = max(0, row_coord - context_patches)
-                col_start_patch = max(0, col_coord - context_patches)
-                
-                center_row_offset = (row_coord - row_start_patch) * patch_size
-                center_col_offset = (col_coord - col_start_patch) * patch_size
+                if crop_tensor is None:
+                    crop_tensor = extract_contextual_crop(
+                        image=ex["full_image"],
+                        spatial_idx=spatial_idx,
+                        patch_size=patch_size,
+                        grid_size=grid_size,
+                        context_patches=context_patches,
+                    )
+                    row_coord = spatial_idx // grid_size
+                    col_coord = spatial_idx % grid_size
+                    row_start_patch = max(0, row_coord - context_patches)
+                    col_start_patch = max(0, col_coord - context_patches)
+                    center_row_offset = (row_coord - row_start_patch) * patch_size
+                    center_col_offset = (col_coord - col_start_patch) * patch_size
+                else:
+                    row_coord = spatial_idx // grid_size
+                    col_coord = spatial_idx % grid_size
+                    center_row_offset = (row_coord * patch_size) - activation_bbox["y"]
+                    center_col_offset = (col_coord * patch_size) - activation_bbox["x"]
                 
                 crop_np = crop_tensor.permute(1, 2, 0).cpu().numpy()
                 crop_unnorm = crop_np * std + mean
@@ -516,6 +672,17 @@ def save_feature_grid_visualization(
                     facecolor="none",
                 )
                 ax_full.add_patch(rect)
+
+                if activation_bbox is not None:
+                    region_rect = patches.Rectangle(
+                        (activation_bbox["x"], activation_bbox["y"]),
+                        activation_bbox["w"],
+                        activation_bbox["h"],
+                        linewidth=1.5,
+                        edgecolor="lime",
+                        facecolor="none",
+                    )
+                    ax_full.add_patch(region_rect)
 
             # --- Row 3: Heatmap Overlay ---
             heatmap = heatmaps[c] if c < len(heatmaps) else None
@@ -575,9 +742,12 @@ def save_feature_activation_heatmap(
         device=device,
     )
 
-    # unnormalize source image for display
-    mean = np.array([0.485, 0.456, 0.406])
-    std = np.array([0.229, 0.224, 0.225])
+    # unnormalize source image for display using derived constants
+    processor = getattr(model_wrapper, "processor", None)
+    mean_val = getattr(processor, "image_mean", [0.485, 0.456, 0.406])
+    std_val = getattr(processor, "image_std", [0.229, 0.224, 0.225])
+    mean = np.array(mean_val)
+    std = np.array(std_val)
     img_np = image.cpu().numpy() if image.dim() == 3 else image[0].cpu().numpy()
     img_display = np.transpose(img_np, (1, 2, 0))
     img_display = img_display * std + mean

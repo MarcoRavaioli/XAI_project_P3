@@ -71,8 +71,10 @@ uv run python run_pipeline.py \
 | `--l1_coeff`        | `1e-3`                        | $L_1$ sparsity coefficient (space-separated for multiple layers)    |
 | `--expansion`       | `8`                           | SAE overcomplete expansion ratio                                    |
 | `--feature_idx`     | `100`                         | SAE feature index to analyse                                        |
-| `--eval_image_idx`  | `0`                           | Index of the evaluation image for causal interventions              |
+| `--eval_image_idx`  | `0`                           | Index of the evaluation image for single-image visualization        |
 | `--context_patches` | `2`                           | Patches of spatial context around each exemplar crop (2 → 5×5 crop) |
+| `--causal_eval_size`| `50`                          | Number of images to run causal interventions on                     |
+| `--target_type`     | `mlp`                         | Submodule layer target type (`mlp` or `residual`)                   |
 | `--device`          | `cpu`                         | Compute device (`cpu` or `cuda`)                                    |
 
 ImageWoof and ImageNette are auto-downloaded if not present. ImageNet-100 falls back to the HuggingFace `clane9/imagenet-100` dataset if no local copy exists (requires `pip install datasets`).
@@ -83,8 +85,8 @@ All outputs are written to `src/out/`.
 
 | File                                       | Description                                                                                              |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `layer_comparison_summary.md`              | Markdown table comparing $R^2$, $L_0$, and mean RLD across layers                                        |
-| `discovered_features_summary.csv`          | Per-feature quantitative results (CLIP label, confidence, baseline/ablated logits, RLD, steering effect) |
+| `layer_comparison_summary.md`              | Markdown table comparing $R^2$, $L_0$, mean RLD, and accuracy drop across layers                        |
+| `discovered_features_summary.csv`          | Per-feature quantitative results (CLIP label, CLIP score, mean RLD, mean steering, accuracy drop)       |
 | `multi_feature_exemplar_grid_layer{N}.png` | Grid of top-5 features (by CLIP score) at layer $N$, with context crops, full images, and heatmaps       |
 | `feature_grid_layer{N}_feat{M}.png`        | Single-feature grid for feature $M$ at layer $N$                                                         |
 | `dose_response_curve.png`                  | RLD as a function of ablation strength for the most causally active Layer 11 feature                     |
